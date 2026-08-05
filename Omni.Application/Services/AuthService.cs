@@ -45,7 +45,7 @@ public sealed class AuthService : IAuthService
 
         var organization = new Organization
         {
-            Name = request.Name,
+            Name = request.OrganizationName,
             Email = request.Email,
             Phone = request.Phone,
             Country = request.Country,
@@ -57,8 +57,8 @@ public sealed class AuthService : IAuthService
         var user = new User
         {
             OrganizationId = organizationId,
-            FirstName = request.Name,
-            LastName = "Admin",
+            FirstName = request.AdminFirstName,
+            LastName = request.AdminLastName,
             Email = request.Email,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             Role = Role.OrganizationAdmin,

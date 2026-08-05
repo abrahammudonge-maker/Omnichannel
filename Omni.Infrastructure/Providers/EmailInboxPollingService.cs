@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Search;
@@ -14,6 +15,12 @@ namespace Omni.Infrastructure.Providers;
 public sealed class EmailInboxPollingService : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
+    private static readonly Regex[] QuoteMarkers =
+    {
+        new(@"^On .+ wrote:\s*$", RegexOptions.IgnoreCase),
+        new(@"^-{2,}\s*Original Message\s*-{2,}$", RegexOptions.IgnoreCase),
+        new(@"^From:\s.+$", RegexOptions.IgnoreCase)
+    };
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<EmailInboxPollingService> _logger;
@@ -91,7 +98,7 @@ public sealed class EmailInboxPollingService : BackgroundService
         }
 
         using var client = new ImapClient();
-        await client.ConnectAsync(imapHost, imapPort.Value, SecureSocketOptions.SslOnConnect, cancellationToken);
+        await client.ConnectAsync(imapHost, imapPort.Value, SecureSocketOptions.Auto, cancellationToken);
         await client.AuthenticateAsync(account.ExternalAccountId!, account.AccessToken!, cancellationToken);
 
         var inbox = client.Inbox;
@@ -106,6 +113,8 @@ public sealed class EmailInboxPollingService : BackgroundService
         var customerRepository = services.GetRequiredService<ICustomerRepository>();
         var conversationRepository = services.GetRequiredService<IConversationRepository>();
         var messageRepository = services.GetRequiredService<IMessageRepository>();
+        var notificationRepository = services.GetRequiredService<INotificationRepository>();
+        var userRepository = services.GetRequiredService<IUserRepository>();
 
         foreach (var uid in unseenUids)
         {
@@ -120,22 +129,62 @@ public sealed class EmailInboxPollingService : BackgroundService
             var customer = await FindOrCreateCustomerAsync(customerRepository, organization.Id, sender.Address, sender.Name, cancellationToken);
             var conversation = await FindOrCreateConversationAsync(conversationRepository, organization.Id, customer.Id, cancellationToken);
 
-            var body = mimeMessage.TextBody ?? StripHtml(mimeMessage.HtmlBody) ?? "(no content)";
+            var rawBody = mimeMessage.TextBody ?? StripHtml(mimeMessage.HtmlBody) ?? "(no content)";
+            var body = StripQuotedReply(rawBody);
+
             await messageRepository.CreateAsync(new Message
             {
                 OrganizationId = organization.Id,
                 ConversationId = conversation.Id,
                 Direction = "Inbound",
                 MessageType = "Text",
-                Body = $"Subject: {mimeMessage.Subject}\n\n{body}".Trim(),
+                Body = body,
                 Status = "Received",
-                SentAt = mimeMessage.Date
+                SentAt = DateTimeOffset.UtcNow
             }, cancellationToken);
+
+            await NotifyAsync(notificationRepository, userRepository, organization.Id, conversation, customer, body, cancellationToken);
 
             await inbox.AddFlagsAsync(uid, MessageFlags.Seen, true, cancellationToken);
         }
 
         await client.DisconnectAsync(true, cancellationToken);
+    }
+
+    private static async Task NotifyAsync(
+        INotificationRepository notificationRepository,
+        IUserRepository userRepository,
+        Guid organizationId,
+        Conversation conversation,
+        Customer customer,
+        string body,
+        CancellationToken cancellationToken)
+    {
+        var title = $"New email from {customer.FullName}";
+        var preview = body.Length > 140 ? body[..140] + "…" : body;
+
+        var recipientIds = new List<Guid>();
+        if (conversation.AssignedUserId is Guid assignedUserId)
+        {
+            recipientIds.Add(assignedUserId);
+        }
+        else
+        {
+            var users = await userRepository.GetAllAsync(organizationId, cancellationToken);
+            recipientIds.AddRange(users.Where(u => u.IsActive).Select(u => u.Id));
+        }
+
+        foreach (var userId in recipientIds)
+        {
+            await notificationRepository.CreateAsync(new Notification
+            {
+                OrganizationId = organizationId,
+                UserId = userId,
+                Title = title,
+                Message = preview,
+                IsRead = false
+            }, cancellationToken);
+        }
     }
 
     private static async Task<Customer> FindOrCreateCustomerAsync(ICustomerRepository customerRepository, Guid organizationId, string email, string? displayName, CancellationToken cancellationToken)
@@ -188,6 +237,25 @@ public sealed class EmailInboxPollingService : BackgroundService
             return null;
         }
 
-        return System.Text.RegularExpressions.Regex.Replace(html, "<.*?>", string.Empty).Trim();
+        return Regex.Replace(html, "<.*?>", string.Empty).Trim();
+    }
+
+    private static string StripQuotedReply(string text)
+    {
+        var lines = text.Replace("\r\n", "\n").Split('\n');
+        var cutoffIndex = lines.Length;
+
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].TrimStart();
+            if (line.StartsWith('>') || QuoteMarkers.Any(pattern => pattern.IsMatch(line.Trim())))
+            {
+                cutoffIndex = i;
+                break;
+            }
+        }
+
+        var result = string.Join("\n", lines.Take(cutoffIndex)).Trim();
+        return string.IsNullOrWhiteSpace(result) ? text.Trim() : result;
     }
 }

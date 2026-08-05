@@ -25,7 +25,7 @@ public sealed class MailKitEmailSender : IEmailSender
         message.Body = new TextPart("plain") { Text = body };
 
         using var client = new SmtpClient();
-        await client.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls, cancellationToken);
+        await client.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.Auto, cancellationToken);
         await client.AuthenticateAsync(mailboxAddress, mailboxPassword, cancellationToken);
         await client.SendAsync(message, cancellationToken);
         await client.DisconnectAsync(true, cancellationToken);

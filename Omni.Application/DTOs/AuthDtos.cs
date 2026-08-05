@@ -1,7 +1,7 @@
 namespace Omni.Application.DTOs;
 
 public sealed record LoginRequest(string Email, string Password);
-public sealed record RegisterRequest(string Name, string Email, string Password, string Phone, string Country);
+public sealed record RegisterRequest(string OrganizationName, string AdminFirstName, string AdminLastName, string Email, string Password, string Phone, string Country);
 public sealed record LoginResponse(string AccessToken, string RefreshToken, Guid UserId, Guid OrganizationId, string Role);
 public sealed record RefreshTokenRequest(string RefreshToken);
 public sealed record CreateOrganizationRequest(string Name, string Email, string Phone, string Country);

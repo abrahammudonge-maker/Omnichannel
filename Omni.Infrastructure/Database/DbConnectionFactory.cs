@@ -11,7 +11,7 @@ public sealed class DbConnectionFactory : IDbConnectionFactory
     public DbConnectionFactory(IConfiguration configuration)
     {
         _connectionString = configuration.GetConnectionString("DefaultConnection")
-            ?? @"Server=localhost\SQLEXPRESS;Database=omnichannel;Trusted_Connection=True;TrustServerCertificate=True;";
+            ?? @"Server=localhost\SQLEXPRESS;Database=omnichannel;Trusted_Connection=True;Encrypt=False;";
     }
 
     public IDbConnection CreateConnection() => new SqlConnection(_connectionString);
