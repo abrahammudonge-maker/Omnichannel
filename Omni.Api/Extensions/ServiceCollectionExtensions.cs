@@ -6,6 +6,7 @@ using Omni.Application.Interfaces;
 using Omni.Application.Services;
 using Omni.Application.Validators;
 using Omni.Infrastructure.Database;
+using Omni.Infrastructure.Providers;
 using Omni.Infrastructure.Repositories;
 using System.Text;
 
@@ -34,6 +35,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IChannelAccountRepository, ChannelAccountRepository>();
         services.AddScoped<IOrganizationSettingRepository, OrganizationSettingRepository>();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddSingleton<IEmailSender, MailKitEmailSender>();
+        services.AddHostedService<EmailInboxPollingService>();
 
         services.AddControllers();
         services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();

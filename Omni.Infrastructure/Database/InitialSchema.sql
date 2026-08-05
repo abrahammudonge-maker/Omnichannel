@@ -217,6 +217,10 @@ CREATE TABLE channel_accounts (
     accesstoken NVARCHAR(MAX),
     refreshtoken NVARCHAR(MAX),
     webhooksecret NVARCHAR(300),
+    smtphost NVARCHAR(200),
+    smtpport INT,
+    imaphost NVARCHAR(200),
+    imapport INT,
     status NVARCHAR(50) NOT NULL DEFAULT 'Active',
     createdat DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
     updatedat DATETIMEOFFSET

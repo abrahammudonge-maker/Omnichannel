@@ -28,6 +28,10 @@ public sealed class ChannelAccountRepository : IChannelAccountRepository
             AccessToken = channelAccount.AccessToken,
             RefreshToken = channelAccount.RefreshToken,
             WebhookSecret = channelAccount.WebhookSecret,
+            SmtpHost = channelAccount.SmtpHost,
+            SmtpPort = channelAccount.SmtpPort,
+            ImapHost = channelAccount.ImapHost,
+            ImapPort = channelAccount.ImapPort,
             Status = channelAccount.Status,
             CreatedAt = channelAccount.CreatedAt,
             UpdatedAt = channelAccount.UpdatedAt
@@ -69,6 +73,10 @@ public sealed class ChannelAccountRepository : IChannelAccountRepository
             AccessToken = channelAccount.AccessToken,
             RefreshToken = channelAccount.RefreshToken,
             WebhookSecret = channelAccount.WebhookSecret,
+            SmtpHost = channelAccount.SmtpHost,
+            SmtpPort = channelAccount.SmtpPort,
+            ImapHost = channelAccount.ImapHost,
+            ImapPort = channelAccount.ImapPort,
             Status = channelAccount.Status,
             UpdatedAt = channelAccount.UpdatedAt
         });

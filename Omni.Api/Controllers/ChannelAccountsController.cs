@@ -50,6 +50,10 @@ public sealed class ChannelAccountsController : ControllerBase
             AccessToken = request.AccessToken,
             RefreshToken = request.RefreshToken,
             WebhookSecret = request.WebhookSecret,
+            SmtpHost = request.SmtpHost,
+            SmtpPort = request.SmtpPort,
+            ImapHost = request.ImapHost,
+            ImapPort = request.ImapPort,
             Status = request.Status
         };
 
@@ -71,6 +75,10 @@ public sealed class ChannelAccountsController : ControllerBase
         existing.AccessToken = request.AccessToken;
         existing.RefreshToken = request.RefreshToken;
         existing.WebhookSecret = request.WebhookSecret;
+        existing.SmtpHost = request.SmtpHost;
+        existing.SmtpPort = request.SmtpPort;
+        existing.ImapHost = request.ImapHost;
+        existing.ImapPort = request.ImapPort;
         existing.Status = request.Status;
 
         await _channelAccountRepository.UpdateAsync(existing, cancellationToken);

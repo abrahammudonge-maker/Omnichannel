@@ -10,6 +10,10 @@ public sealed class ChannelAccount
     public string? AccessToken { get; set; }
     public string? RefreshToken { get; set; }
     public string? WebhookSecret { get; set; }
+    public string? SmtpHost { get; set; }
+    public int? SmtpPort { get; set; }
+    public string? ImapHost { get; set; }
+    public int? ImapPort { get; set; }
     public string Status { get; set; } = "Active";
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }

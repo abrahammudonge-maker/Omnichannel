@@ -103,6 +103,7 @@ public sealed class AuthService : IAuthService
         var issuer = _configuration["Jwt:Issuer"] ?? "https://localhost";
         var audience = _configuration["Jwt:Audience"] ?? "omnichannel";
         var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? "super-secret-key-for-development-1234567890");
+        var expiryMinutes = int.TryParse(_configuration["Jwt:ExpiryMinutes"], out var parsedMinutes) ? parsedMinutes : 60;
 
         var claims = new List<Claim>
         {
@@ -117,7 +118,7 @@ public sealed class AuthService : IAuthService
             issuer: issuer,
             audience: audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(60),
+            expires: DateTime.UtcNow.AddMinutes(expiryMinutes),
             signingCredentials: credentials);
 
         var refreshToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
