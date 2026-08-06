@@ -18,6 +18,7 @@ public sealed class MessagesController : ControllerBase
     private readonly ICustomerRepository _customerRepository;
     private readonly IChannelAccountRepository _channelAccountRepository;
     private readonly IEmailSender _emailSender;
+    private readonly IMetaMessageSender _metaMessageSender;
     private readonly ILogger<MessagesController> _logger;
 
     public MessagesController(
@@ -26,6 +27,7 @@ public sealed class MessagesController : ControllerBase
         ICustomerRepository customerRepository,
         IChannelAccountRepository channelAccountRepository,
         IEmailSender emailSender,
+        IMetaMessageSender metaMessageSender,
         ILogger<MessagesController> logger)
     {
         _messageRepository = messageRepository;
@@ -33,6 +35,7 @@ public sealed class MessagesController : ControllerBase
         _customerRepository = customerRepository;
         _channelAccountRepository = channelAccountRepository;
         _emailSender = emailSender;
+        _metaMessageSender = metaMessageSender;
         _logger = logger;
     }
 
@@ -71,14 +74,22 @@ public sealed class MessagesController : ControllerBase
 
         if (request.Direction == "Outbound")
         {
-            var emailResult = await TrySendEmailAsync(organizationId, request.ConversationId, request.Body, cancellationToken);
-            if (emailResult is not null)
+            var conversation = await _conversationRepository.GetByIdAsync(request.ConversationId, organizationId, cancellationToken);
+            var sendResult = conversation?.Channel switch
             {
-                message.Status = emailResult.Value.Success ? "Sent" : "Failed";
+                Channel.Email => await TrySendEmailAsync(organizationId, conversation, request.Body, cancellationToken),
+                Channel.WhatsApp or Channel.FacebookMessenger or Channel.Instagram =>
+                    await TrySendMetaMessageAsync(organizationId, conversation!, request.Body, cancellationToken),
+                _ => null
+            };
+
+            if (sendResult is not null)
+            {
+                message.Status = sendResult.Value.Success ? "Sent" : "Failed";
                 await _messageRepository.UpdateAsync(message, cancellationToken);
-                if (!emailResult.Value.Success)
+                if (!sendResult.Value.Success)
                 {
-                    return Ok(ApiResponse<Guid>.Fail($"Message saved, but not delivered. {emailResult.Value.FailureReason}"));
+                    return Ok(ApiResponse<Guid>.Fail($"Message saved, but not delivered. {sendResult.Value.FailureReason}"));
                 }
             }
         }
@@ -86,14 +97,8 @@ public sealed class MessagesController : ControllerBase
         return Ok(ApiResponse<Guid>.Ok(id, "Message created successfully."));
     }
 
-    private async Task<(bool Success, string? FailureReason)?> TrySendEmailAsync(Guid organizationId, Guid conversationId, string body, CancellationToken cancellationToken)
+    private async Task<(bool Success, string? FailureReason)?> TrySendEmailAsync(Guid organizationId, Conversation conversation, string body, CancellationToken cancellationToken)
     {
-        var conversation = await _conversationRepository.GetByIdAsync(conversationId, organizationId, cancellationToken);
-        if (conversation is null || conversation.Channel != Channel.Email)
-        {
-            return null;
-        }
-
         var customer = await _customerRepository.GetByIdAsync(conversation.CustomerId, organizationId, cancellationToken);
         if (customer is null || string.IsNullOrWhiteSpace(customer.Email))
         {
@@ -132,13 +137,51 @@ public sealed class MessagesController : ControllerBase
         }
         catch (MailKit.Security.AuthenticationException ex)
         {
-            _logger.LogError(ex, "Email authentication failed for conversation {ConversationId}", conversationId);
+            _logger.LogError(ex, "Email authentication failed for conversation {ConversationId}", conversation.Id);
             return (false, $"Could not authenticate with mailbox {emailAccount.ExternalAccountId} at {smtpHost}. Check the address and app password under Settings → Channels.");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to send outbound email for conversation {ConversationId}", conversationId);
+            _logger.LogError(ex, "Failed to send outbound email for conversation {ConversationId}", conversation.Id);
             return (false, $"Email send failed: {ex.Message}");
+        }
+    }
+
+    private async Task<(bool Success, string? FailureReason)?> TrySendMetaMessageAsync(Guid organizationId, Conversation conversation, string body, CancellationToken cancellationToken)
+    {
+        var channelType = conversation.Channel.ToString();
+        var customer = await _customerRepository.GetByIdAsync(conversation.CustomerId, organizationId, cancellationToken);
+
+        var recipientId = conversation.Channel switch
+        {
+            Channel.WhatsApp => customer?.WhatsAppNumber,
+            Channel.FacebookMessenger => customer?.FacebookId,
+            Channel.Instagram => customer?.InstagramId,
+            _ => null
+        };
+
+        if (customer is null || string.IsNullOrWhiteSpace(recipientId))
+        {
+            return (false, $"This customer has no {channelType} contact on file.");
+        }
+
+        var channelAccounts = await _channelAccountRepository.GetAllAsync(organizationId, cancellationToken);
+        var account = channelAccounts.FirstOrDefault(a => a.ChannelType == channelType && a.Status == "Active"
+            && !string.IsNullOrWhiteSpace(a.ExternalAccountId) && !string.IsNullOrWhiteSpace(a.AccessToken));
+        if (account is null)
+        {
+            return (false, $"No active {channelType} channel is connected. Connect one under Settings → Channels.");
+        }
+
+        try
+        {
+            await _metaMessageSender.SendAsync(channelType, account.AccessToken!, account.ExternalAccountId!, recipientId, body, cancellationToken);
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send outbound {ChannelType} message for conversation {ConversationId}", channelType, conversation.Id);
+            return (false, $"{channelType} send failed: {ex.Message}");
         }
     }
 

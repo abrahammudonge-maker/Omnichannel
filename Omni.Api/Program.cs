@@ -7,10 +7,30 @@ builder.Services.AddApplicationServices(builder.Configuration);
 
 var app = builder.Build();
 
+var pathBase = builder.Configuration["PathBase"];
+if (!string.IsNullOrWhiteSpace(pathBase))
+{
+    app.UsePathBase(pathBase);
+}
+
 app.UseMiddleware<ExceptionMiddleware>();
 app.UseHttpsRedirection();
 app.UseRouting();
-app.UseCors(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>();
+app.UseCors(policy =>
+{
+    if (allowedOrigins is { Length: > 0 })
+    {
+        policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod();
+    }
+    else
+    {
+        // No explicit allow-list configured (local dev default) — open to any origin.
+        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+    }
+});
+
 app.UseAuthentication();
 app.UseAuthorization();
 

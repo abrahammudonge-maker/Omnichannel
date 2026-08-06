@@ -4,6 +4,15 @@ obj/
 *.user
 *.suo
 
+## Production secrets (create appsettings.Production.json directly on the server — never commit it)
+appsettings.Production.json
+appsettings.*.local.json
+
+## Deployment artifacts (built locally, contain real secrets — never commit)
+publish/
+deploy-artifacts/
+deploy-artifacts.zip
+
 ## IDE
 .vs/
 .vscode/

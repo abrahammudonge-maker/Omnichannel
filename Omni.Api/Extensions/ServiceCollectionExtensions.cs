@@ -2,6 +2,7 @@ using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Omni.Api.Configuration;
+using Omni.Application.Configuration;
 using Omni.Application.Interfaces;
 using Omni.Application.Services;
 using Omni.Application.Validators;
@@ -17,6 +18,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<JwtSettings>(configuration.GetSection("Jwt"));
+        services.Configure<MetaSettings>(configuration.GetSection("Meta"));
         services.AddSingleton<IDbConnectionFactory, DbConnectionFactory>();
         services.AddScoped<IOrganizationRepository, OrganizationRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
@@ -37,6 +39,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAuthService, AuthService>();
         services.AddSingleton<IEmailSender, MailKitEmailSender>();
         services.AddHostedService<EmailInboxPollingService>();
+        services.AddHttpClient("GraphApi");
+        services.AddSingleton<IMetaMessageSender, GraphApiMessageSender>();
+        services.AddScoped<IMetaEmbeddedSignupService, MetaEmbeddedSignupService>();
 
         services.AddControllers();
         services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();

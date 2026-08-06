@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using Omni.Application.Configuration;
 using Omni.Application.DTOs;
 using Omni.Application.Interfaces;
 using Omni.Domain.Entities;
@@ -13,10 +15,17 @@ namespace Omni.Api.Controllers;
 public sealed class ChannelAccountsController : ControllerBase
 {
     private readonly IChannelAccountRepository _channelAccountRepository;
+    private readonly IMetaEmbeddedSignupService _metaEmbeddedSignupService;
+    private readonly MetaSettings _metaSettings;
 
-    public ChannelAccountsController(IChannelAccountRepository channelAccountRepository)
+    public ChannelAccountsController(
+        IChannelAccountRepository channelAccountRepository,
+        IMetaEmbeddedSignupService metaEmbeddedSignupService,
+        IOptions<MetaSettings> metaSettings)
     {
         _channelAccountRepository = channelAccountRepository;
+        _metaEmbeddedSignupService = metaEmbeddedSignupService;
+        _metaSettings = metaSettings.Value;
     }
 
     [HttpGet]
@@ -83,6 +92,35 @@ public sealed class ChannelAccountsController : ControllerBase
 
         await _channelAccountRepository.UpdateAsync(existing, cancellationToken);
         return Ok(ApiResponse.Ok("Channel account updated successfully."));
+    }
+
+    /// <summary>Completes a Meta Embedded Signup flow (WhatsApp/Messenger/Instagram) and creates the resulting channel account.</summary>
+    [HttpPost("connect-meta")]
+    public async Task<ActionResult<ApiResponse<Guid>>> ConnectMeta([FromBody] ConnectMetaChannelRequest request, CancellationToken cancellationToken)
+    {
+        var organizationId = GetOrganizationId();
+
+        var result = request.ChannelType switch
+        {
+            "WhatsApp" => await _metaEmbeddedSignupService.CompleteWhatsAppSignupAsync(request.Code, cancellationToken),
+            "FacebookMessenger" => await _metaEmbeddedSignupService.CompleteMessengerSignupAsync(request.Code, cancellationToken),
+            "Instagram" => await _metaEmbeddedSignupService.CompleteInstagramSignupAsync(request.Code, cancellationToken),
+            _ => throw new InvalidOperationException($"Unsupported Meta channel type: {request.ChannelType}")
+        };
+
+        var account = new ChannelAccount
+        {
+            OrganizationId = organizationId,
+            ChannelType = request.ChannelType,
+            DisplayName = result.DisplayName,
+            ExternalAccountId = result.ExternalAccountId,
+            AccessToken = result.AccessToken,
+            WebhookSecret = _metaSettings.WebhookVerifyToken,
+            Status = "Active"
+        };
+
+        var id = await _channelAccountRepository.CreateAsync(account, cancellationToken);
+        return Ok(ApiResponse<Guid>.Ok(id, "Channel connected successfully."));
     }
 
     [HttpDelete("{id:guid}")]
