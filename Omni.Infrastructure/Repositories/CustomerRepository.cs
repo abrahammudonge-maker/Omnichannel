@@ -28,6 +28,19 @@ public sealed class CustomerRepository : ICustomerRepository
         return result.ToList();
     }
 
+    public async Task<Customer?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        return await connection.QuerySingleOrDefaultAsync<Customer>(CustomerQueries.GetByIdPlatformWide, new { Id = id });
+    }
+
+    public async Task<IReadOnlyList<Customer>> GetAllAsync(CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        var result = await connection.QueryAsync<Customer>(CustomerQueries.GetAllPlatformWide);
+        return result.ToList();
+    }
+
     public async Task<Guid> CreateAsync(Customer customer, CancellationToken cancellationToken)
     {
         using var connection = _connectionFactory.CreateConnection();

@@ -8,7 +8,7 @@ using Omni.Shared.Responses;
 namespace Omni.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Policy = "RequireAgent")]
 [Route("api/[controller]")]
 public sealed class TagsController : ControllerBase
 {

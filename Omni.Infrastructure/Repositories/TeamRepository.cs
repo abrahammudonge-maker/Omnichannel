@@ -51,6 +51,19 @@ public sealed class TeamRepository : ITeamRepository
         return await connection.QuerySingleOrDefaultAsync<Team>(TeamQueries.GetById, new { Id = id, OrganizationId = organizationId });
     }
 
+    public async Task<Team?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        return await connection.QuerySingleOrDefaultAsync<Team>(TeamQueries.GetByIdPlatformWide, new { Id = id });
+    }
+
+    public async Task<IReadOnlyList<Team>> GetAllAsync(CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        var result = await connection.QueryAsync<Team>(TeamQueries.GetAllPlatformWide);
+        return result.ToList();
+    }
+
     public async Task UpdateAsync(Team team, CancellationToken cancellationToken)
     {
         using var connection = _connectionFactory.CreateConnection();

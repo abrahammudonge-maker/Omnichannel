@@ -8,7 +8,7 @@ using Omni.Shared.Responses;
 namespace Omni.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Policy = "RequireAgent")]
 [Route("api/[controller]")]
 public sealed class ConversationStatusesController : ControllerBase
 {
@@ -33,23 +33,26 @@ public sealed class ConversationStatusesController : ControllerBase
     public async Task<ActionResult<ApiResponse<Guid>>> Create([FromBody] UpdateConversationStatusRequest request, CancellationToken cancellationToken)
     {
         var organizationId = GetOrganizationId();
+        var conversation = await _conversationRepository.GetByIdAsync(request.ConversationId, organizationId, cancellationToken);
+        if (conversation is null)
+            return NotFound(ApiResponse<Guid>.Fail("Conversation not found."));
+
+        if (request.Status is not ("Open" or "In Progress" or "Resolved" or "Closed"))
+            return BadRequest(ApiResponse<Guid>.Fail("Invalid conversation status."));
+
         var statusHistory = new ConversationStatusHistory
         {
             OrganizationId = organizationId,
             ConversationId = request.ConversationId,
             Status = request.Status,
-            ChangedBy = request.ChangedBy,
+            ChangedBy = GetUserId(),
             Reason = request.Reason
         };
 
         var id = await _conversationStatusRepository.CreateAsync(statusHistory, cancellationToken);
 
-        var conversation = await _conversationRepository.GetByIdAsync(request.ConversationId, organizationId, cancellationToken);
-        if (conversation is not null)
-        {
-            conversation.Status = request.Status;
-            await _conversationRepository.UpdateAsync(conversation, cancellationToken);
-        }
+        conversation.Status = request.Status;
+        await _conversationRepository.UpdateAsync(conversation, cancellationToken);
 
         return Ok(ApiResponse<Guid>.Ok(id, "Conversation status updated successfully."));
     }
@@ -59,4 +62,6 @@ public sealed class ConversationStatusesController : ControllerBase
         var claim = User.Claims.FirstOrDefault(c => c.Type == "OrganizationId");
         return claim is null ? Guid.Empty : Guid.Parse(claim.Value);
     }
+
+    private Guid GetUserId() => Guid.Parse(User.Claims.First(c => c.Type == "UserId").Value);
 }

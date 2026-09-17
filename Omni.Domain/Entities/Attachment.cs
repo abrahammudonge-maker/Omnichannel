@@ -9,6 +9,15 @@ public sealed class Attachment
     public string ContentType { get; set; } = string.Empty;
     public long FileSize { get; set; }
     public string StoragePath { get; set; } = string.Empty;
-    public Guid UploadedBy { get; set; }
+    public Guid? UploadedBy { get; set; }
     public DateTimeOffset UploadedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    public static string MessageTypeForContentType(string? contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType)) return "Document";
+        if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) return "Image";
+        if (contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)) return "Video";
+        if (contentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase)) return "Audio";
+        return "Document";
+    }
 }

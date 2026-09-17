@@ -16,13 +16,22 @@ public sealed class MailKitEmailSender : IEmailSender
         string toAddress,
         string subject,
         string body,
+        EmailAttachment? attachment,
         CancellationToken cancellationToken)
     {
         var message = new MimeMessage();
         message.From.Add(new MailboxAddress(fromDisplayName, mailboxAddress));
         message.To.Add(MailboxAddress.Parse(toAddress));
         message.Subject = subject;
-        message.Body = new TextPart("plain") { Text = body };
+
+        var builder = new BodyBuilder { TextBody = body };
+        if (attachment is not null)
+        {
+            using var memoryStream = new MemoryStream();
+            await attachment.Content.CopyToAsync(memoryStream, cancellationToken);
+            builder.Attachments.Add(attachment.FileName, memoryStream.ToArray(), ContentType.Parse(attachment.ContentType));
+        }
+        message.Body = builder.ToMessageBody();
 
         using var client = new SmtpClient();
         await client.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.Auto, cancellationToken);

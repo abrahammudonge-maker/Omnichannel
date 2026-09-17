@@ -8,7 +8,7 @@ using Omni.Shared.Responses;
 namespace Omni.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Policy = "RequireOrganizationAdmin")]
 [Route("api/[controller]")]
 public sealed class TeamsController : ControllerBase
 {

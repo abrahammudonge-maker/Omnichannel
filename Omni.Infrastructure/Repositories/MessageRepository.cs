@@ -35,6 +35,24 @@ public sealed class MessageRepository : IMessageRepository
         return result.ToList();
     }
 
+    public async Task<DateTimeOffset?> GetLastInboundSentAtAsync(Guid conversationId, Guid organizationId, CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        return await connection.ExecuteScalarAsync<DateTimeOffset?>(MessageQueries.GetLastInboundSentAt, new { ConversationId = conversationId, OrganizationId = organizationId });
+    }
+
+    public async Task MarkOutboundAsReadAsync(Guid conversationId, Guid organizationId, CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.ExecuteAsync(MessageQueries.MarkOutboundAsRead, new { ConversationId = conversationId, OrganizationId = organizationId });
+    }
+
+    public async Task<bool> ExistsByExternalMessageIdAsync(string externalMessageId, Guid organizationId, CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        return await connection.ExecuteScalarAsync<int>(MessageQueries.ExistsByExternalMessageId, new { ExternalMessageId = externalMessageId, OrganizationId = organizationId }) > 0;
+    }
+
     public async Task<Guid> CreateAsync(Message message, CancellationToken cancellationToken)
     {
         using var connection = _connectionFactory.CreateConnection();
@@ -43,6 +61,7 @@ public sealed class MessageRepository : IMessageRepository
             Id = message.Id,
             OrganizationId = message.OrganizationId,
             ConversationId = message.ConversationId,
+            ExternalMessageId = message.ExternalMessageId,
             Direction = message.Direction,
             MessageType = message.MessageType,
             Body = message.Body,
@@ -57,6 +76,17 @@ public sealed class MessageRepository : IMessageRepository
     {
         using var connection = _connectionFactory.CreateConnection();
         await connection.ExecuteAsync(MessageQueries.Update, message);
+    }
+
+    public async Task UpdateStatusByExternalMessageIdAsync(string externalMessageId, Guid organizationId, string status, CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        await connection.ExecuteAsync(MessageQueries.UpdateStatusByExternalMessageId, new
+        {
+            ExternalMessageId = externalMessageId,
+            OrganizationId = organizationId,
+            Status = status
+        });
     }
 
     public async Task DeleteAsync(Guid id, Guid organizationId, CancellationToken cancellationToken)

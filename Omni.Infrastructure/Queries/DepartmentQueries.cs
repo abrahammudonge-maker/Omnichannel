@@ -31,4 +31,16 @@ public static class DepartmentQueries
         DELETE FROM departments
         WHERE id = @Id AND organizationid = @OrganizationId;
     ";
+
+    public const string GetByIdPlatformWide = @"
+        SELECT id, organizationid, name, description, isactive, createdat, updatedat
+        FROM departments
+        WHERE id = @Id;
+    ";
+
+    public const string GetAllPlatformWide = @"
+        SELECT id, organizationid, name, description, isactive, createdat, updatedat
+        FROM departments
+        ORDER BY createdat DESC;
+    ";
 }

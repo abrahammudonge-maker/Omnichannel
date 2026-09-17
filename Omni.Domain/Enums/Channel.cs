@@ -6,5 +6,6 @@ public enum Channel
     FacebookMessenger = 2,
     Instagram = 3,
     Email = 4,
-    Sms = 5
+    Sms = 5,
+    Voice = 6
 }

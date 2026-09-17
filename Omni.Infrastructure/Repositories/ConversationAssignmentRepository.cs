@@ -31,16 +31,16 @@ public sealed class ConversationAssignmentRepository : IConversationAssignmentRe
         return id;
     }
 
-    public async Task<ConversationAssignment?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+    public async Task<ConversationAssignment?> GetByIdAsync(Guid id, Guid organizationId, CancellationToken cancellationToken)
     {
         using var connection = _connectionFactory.CreateConnection();
-        return await connection.QuerySingleOrDefaultAsync<ConversationAssignment>(ConversationAssignmentQueries.GetById, new { Id = id });
+        return await connection.QuerySingleOrDefaultAsync<ConversationAssignment>(ConversationAssignmentQueries.GetById, new { Id = id, OrganizationId = organizationId });
     }
 
-    public async Task<IReadOnlyList<ConversationAssignment>> GetByConversationIdAsync(Guid conversationId, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<ConversationAssignment>> GetByConversationIdAsync(Guid conversationId, Guid organizationId, CancellationToken cancellationToken)
     {
         using var connection = _connectionFactory.CreateConnection();
-        var result = await connection.QueryAsync<ConversationAssignment>(ConversationAssignmentQueries.GetByConversationId, new { ConversationId = conversationId });
+        var result = await connection.QueryAsync<ConversationAssignment>(ConversationAssignmentQueries.GetByConversationId, new { ConversationId = conversationId, OrganizationId = organizationId });
         return result.ToList();
     }
 }

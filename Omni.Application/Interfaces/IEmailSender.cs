@@ -1,5 +1,7 @@
 namespace Omni.Application.Interfaces;
 
+public sealed record EmailAttachment(string FileName, string ContentType, Stream Content);
+
 public interface IEmailSender
 {
     Task SendAsync(
@@ -11,5 +13,6 @@ public interface IEmailSender
         string toAddress,
         string subject,
         string body,
+        EmailAttachment? attachment,
         CancellationToken cancellationToken);
 }

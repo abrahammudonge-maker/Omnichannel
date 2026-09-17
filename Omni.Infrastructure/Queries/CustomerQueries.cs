@@ -30,4 +30,16 @@ public static class CustomerQueries
         DELETE FROM customers
         WHERE id = @Id AND organizationid = @OrganizationId;
     ";
+
+    public const string GetByIdPlatformWide = @"
+        SELECT id, organizationid, fullname, phone, email, facebookid, instagramid, whatsappnumber, createdat
+        FROM customers
+        WHERE id = @Id;
+    ";
+
+    public const string GetAllPlatformWide = @"
+        SELECT id, organizationid, fullname, phone, email, facebookid, instagramid, whatsappnumber, createdat
+        FROM customers
+        ORDER BY createdat DESC;
+    ";
 }

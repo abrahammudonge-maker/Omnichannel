@@ -7,6 +7,8 @@ public sealed class ChannelAccount
     public string ChannelType { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string? ExternalAccountId { get; set; }
+    /// <summary>WhatsApp Business Account id this phone number belongs to. Templates live at this level, not per number.</summary>
+    public string? ExternalWabaId { get; set; }
     public string? AccessToken { get; set; }
     public string? RefreshToken { get; set; }
     public string? WebhookSecret { get; set; }

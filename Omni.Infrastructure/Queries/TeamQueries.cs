@@ -31,4 +31,16 @@ public static class TeamQueries
         DELETE FROM teams
         WHERE id = @Id AND organizationid = @OrganizationId;
     ";
+
+    public const string GetByIdPlatformWide = @"
+        SELECT id, organizationid, departmentid, name, description, leaderid, isactive, createdat
+        FROM teams
+        WHERE id = @Id;
+    ";
+
+    public const string GetAllPlatformWide = @"
+        SELECT id, organizationid, departmentid, name, description, leaderid, isactive, createdat
+        FROM teams
+        ORDER BY createdat DESC;
+    ";
 }

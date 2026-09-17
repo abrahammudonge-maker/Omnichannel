@@ -180,6 +180,7 @@ public sealed class EmailInboxPollingService : BackgroundService
             {
                 OrganizationId = organizationId,
                 UserId = userId,
+                ConversationId = conversation.Id,
                 Title = title,
                 Message = preview,
                 IsRead = false

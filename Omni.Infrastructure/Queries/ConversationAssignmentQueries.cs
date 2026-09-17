@@ -10,14 +10,16 @@ public static class ConversationAssignmentQueries
 
     public const string GetById = @"
         SELECT id, conversationid, assignedto, assignedby, assignedat, reason
-        FROM conversation_assignments
-        WHERE id = @Id;
+        FROM conversation_assignments ca
+        INNER JOIN conversations c ON c.id = ca.conversationid
+        WHERE ca.id = @Id AND c.organizationid = @OrganizationId;
     ";
 
     public const string GetByConversationId = @"
         SELECT id, conversationid, assignedto, assignedby, assignedat, reason
-        FROM conversation_assignments
-        WHERE conversationid = @ConversationId
-        ORDER BY assignedat DESC;
+        FROM conversation_assignments ca
+        INNER JOIN conversations c ON c.id = ca.conversationid
+        WHERE ca.conversationid = @ConversationId AND c.organizationid = @OrganizationId
+        ORDER BY ca.assignedat DESC;
     ";
 }

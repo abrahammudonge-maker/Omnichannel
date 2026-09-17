@@ -8,15 +8,17 @@ using Omni.Shared.Responses;
 namespace Omni.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Policy = "RequireAgent")]
 [Route("api/[controller]")]
 public sealed class InternalNotesController : ControllerBase
 {
     private readonly IInternalNoteRepository _internalNoteRepository;
+    private readonly IConversationRepository _conversationRepository;
 
-    public InternalNotesController(IInternalNoteRepository internalNoteRepository)
+    public InternalNotesController(IInternalNoteRepository internalNoteRepository, IConversationRepository conversationRepository)
     {
         _internalNoteRepository = internalNoteRepository;
+        _conversationRepository = conversationRepository;
     }
 
     [HttpGet("conversation/{conversationId:guid}")]
@@ -31,6 +33,9 @@ public sealed class InternalNotesController : ControllerBase
     public async Task<ActionResult<ApiResponse<Guid>>> Create([FromBody] AddInternalNoteRequest request, CancellationToken cancellationToken)
     {
         var organizationId = GetOrganizationId();
+        if (await _conversationRepository.GetByIdAsync(request.ConversationId, organizationId, cancellationToken) is null)
+            return NotFound(ApiResponse<Guid>.Fail("Conversation not found."));
+        if (string.IsNullOrWhiteSpace(request.Body)) return BadRequest(ApiResponse<Guid>.Fail("Note body is required."));
         var userId = GetUserId();
         var note = new InternalNote
         {

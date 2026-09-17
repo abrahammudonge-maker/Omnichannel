@@ -23,6 +23,7 @@ public sealed class NotificationRepository : INotificationRepository
             Id = notification.Id,
             OrganizationId = notification.OrganizationId,
             UserId = notification.UserId,
+            ConversationId = notification.ConversationId,
             Title = notification.Title,
             Message = notification.Message,
             IsRead = notification.IsRead,

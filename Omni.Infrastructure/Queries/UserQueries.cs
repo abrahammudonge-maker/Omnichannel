@@ -13,10 +13,21 @@ public static class UserQueries
         WHERE id = @Id AND organizationid = @OrganizationId;
     ";
 
+    public const string GetByIdAnyOrganization = @"
+        SELECT id, organizationid, firstname, lastname, email, passwordhash, role, isactive, createdat
+        FROM users WHERE id = @Id;
+    ";
+
     public const string GetAll = @"
         SELECT id, organizationid, firstname, lastname, email, passwordhash, role, isactive, createdat
         FROM users
         WHERE organizationid = @OrganizationId
+        ORDER BY createdat DESC;
+    ";
+
+    public const string GetAllPlatformWide = @"
+        SELECT id, organizationid, firstname, lastname, email, passwordhash, role, isactive, createdat
+        FROM users
         ORDER BY createdat DESC;
     ";
 

@@ -5,6 +5,7 @@ public sealed class Notification
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid OrganizationId { get; set; }
     public Guid UserId { get; set; }
+    public Guid? ConversationId { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
     public bool IsRead { get; set; }

@@ -28,6 +28,19 @@ public sealed class ConversationRepository : IConversationRepository
         return result.ToList();
     }
 
+    public async Task<Conversation?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        return await connection.QuerySingleOrDefaultAsync<Conversation>(ConversationQueries.GetByIdPlatformWide, new { Id = id });
+    }
+
+    public async Task<IReadOnlyList<Conversation>> GetAllAsync(CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        var result = await connection.QueryAsync<Conversation>(ConversationQueries.GetAllPlatformWide);
+        return result.ToList();
+    }
+
     public async Task<Guid> CreateAsync(Conversation conversation, CancellationToken cancellationToken)
     {
         using var connection = _connectionFactory.CreateConnection();
@@ -36,6 +49,7 @@ public sealed class ConversationRepository : IConversationRepository
             Id = conversation.Id,
             OrganizationId = conversation.OrganizationId,
             CustomerId = conversation.CustomerId,
+            ChannelAccountId = conversation.ChannelAccountId,
             Channel = conversation.Channel,
             Status = conversation.Status,
             AssignedUserId = conversation.AssignedUserId,

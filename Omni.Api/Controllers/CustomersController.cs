@@ -8,7 +8,7 @@ using Omni.Shared.Responses;
 namespace Omni.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Policy = "RequireAgent")]
 [Route("api/[controller]")]
 public sealed class CustomersController : ControllerBase
 {
@@ -44,6 +44,36 @@ public sealed class CustomersController : ControllerBase
 
         var id = await _customerRepository.CreateAsync(customer, cancellationToken);
         return Ok(ApiResponse<Guid>.Ok(id, "Customer created successfully."));
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<ApiResponse<Customer>>> GetById(Guid id, CancellationToken cancellationToken)
+    {
+        var customer = await _customerRepository.GetByIdAsync(id, GetOrganizationId(), cancellationToken);
+        return customer is null ? NotFound(ApiResponse<Customer>.Fail("Customer not found.")) : Ok(ApiResponse<Customer>.Ok(customer));
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<ActionResult<ApiResponse>> Update(Guid id, [FromBody] UpdateCustomerRequest request, CancellationToken cancellationToken)
+    {
+        var customer = await _customerRepository.GetByIdAsync(id, GetOrganizationId(), cancellationToken);
+        if (customer is null) return NotFound(ApiResponse.Fail("Customer not found."));
+        customer.FullName = request.FullName;
+        customer.Phone = request.Phone;
+        customer.Email = request.Email;
+        customer.FacebookId = request.FacebookId;
+        customer.InstagramId = request.InstagramId;
+        customer.WhatsAppNumber = request.WhatsAppNumber;
+        await _customerRepository.UpdateAsync(customer, cancellationToken);
+        return Ok(ApiResponse.Ok("Customer updated successfully."));
+    }
+
+    [HttpDelete("{id:guid}")]
+    [Authorize(Policy = "RequireOrganizationAdmin")]
+    public async Task<ActionResult<ApiResponse>> Delete(Guid id, CancellationToken cancellationToken)
+    {
+        await _customerRepository.DeleteAsync(id, GetOrganizationId(), cancellationToken);
+        return Ok(ApiResponse.Ok("Customer deleted successfully."));
     }
 
     private Guid GetOrganizationId()

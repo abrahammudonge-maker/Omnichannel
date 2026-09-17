@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Omni.Application.DTOs;
 using Omni.Application.Interfaces;
 using Omni.Shared.Responses;
@@ -18,6 +19,7 @@ public sealed class AuthController : ControllerBase
     }
 
     [HttpPost("login")]
+    [EnableRateLimiting("auth")]
     public async Task<ActionResult<ApiResponse<LoginResponse>>> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)
     {
         var result = await _authService.LoginAsync(request, cancellationToken);
@@ -25,6 +27,7 @@ public sealed class AuthController : ControllerBase
     }
 
     [HttpPost("register")]
+    [EnableRateLimiting("auth")]
     public async Task<ActionResult<ApiResponse<LoginResponse>>> Register([FromBody] RegisterRequest request, CancellationToken cancellationToken)
     {
         var result = await _authService.RegisterAsync(request, cancellationToken);
@@ -32,6 +35,7 @@ public sealed class AuthController : ControllerBase
     }
 
     [HttpPost("refresh-token")]
+    [EnableRateLimiting("auth")]
     public async Task<ActionResult<ApiResponse<LoginResponse>>> RefreshToken([FromBody] RefreshTokenRequest request, CancellationToken cancellationToken)
     {
         var result = await _authService.RefreshTokenAsync(request.RefreshToken, cancellationToken);

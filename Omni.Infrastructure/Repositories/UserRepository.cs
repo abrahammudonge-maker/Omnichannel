@@ -21,10 +21,23 @@ public sealed class UserRepository : IUserRepository
         return await connection.QuerySingleOrDefaultAsync<User>(UserQueries.GetById, new { Id = id, OrganizationId = organizationId });
     }
 
+    public async Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        return await connection.QuerySingleOrDefaultAsync<User>(UserQueries.GetByIdAnyOrganization, new { Id = id });
+    }
+
     public async Task<IReadOnlyList<User>> GetAllAsync(Guid organizationId, CancellationToken cancellationToken)
     {
         using var connection = _connectionFactory.CreateConnection();
         var result = await connection.QueryAsync<User>(UserQueries.GetAll, new { OrganizationId = organizationId });
+        return result.ToList();
+    }
+
+    public async Task<IReadOnlyList<User>> GetAllAsync(CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        var result = await connection.QueryAsync<User>(UserQueries.GetAllPlatformWide);
         return result.ToList();
     }
 

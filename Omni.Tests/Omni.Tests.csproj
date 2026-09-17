@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Omni.Application\Omni.Application.csproj" />
+    <ProjectReference Include="..\Omni.Infrastructure\Omni.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

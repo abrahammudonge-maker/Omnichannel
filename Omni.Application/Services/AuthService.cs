@@ -15,24 +15,26 @@ public sealed class AuthService : IAuthService
 {
     private readonly IUserRepository _userRepository;
     private readonly IOrganizationRepository _organizationRepository;
+    private readonly IRefreshTokenRepository _refreshTokenRepository;
     private readonly IConfiguration _configuration;
 
-    public AuthService(IUserRepository userRepository, IOrganizationRepository organizationRepository, IConfiguration configuration)
+    public AuthService(IUserRepository userRepository, IOrganizationRepository organizationRepository, IRefreshTokenRepository refreshTokenRepository, IConfiguration configuration)
     {
         _userRepository = userRepository;
         _organizationRepository = organizationRepository;
+        _refreshTokenRepository = refreshTokenRepository;
         _configuration = configuration;
     }
 
     public async Task<LoginResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
     {
         var user = await _userRepository.GetByEmailAsync(request.Email, cancellationToken);
-        if (user is null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+        if (user is null || !user.IsActive || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
         {
             throw new UnauthorizedAccessException("Invalid email or password.");
         }
 
-        return CreateTokenResponse(user);
+        return await CreateTokenResponseAsync(user, cancellationToken);
     }
 
     public async Task<LoginResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken)
@@ -66,43 +68,43 @@ public sealed class AuthService : IAuthService
         };
 
         await _userRepository.CreateAsync(user, cancellationToken);
-        return CreateTokenResponse(user);
+        return await CreateTokenResponseAsync(user, cancellationToken);
     }
 
-    public Task<LoginResponse> RefreshTokenAsync(string refreshToken, CancellationToken cancellationToken)
+    public async Task<LoginResponse> RefreshTokenAsync(string refreshToken, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(refreshToken))
         {
             throw new UnauthorizedAccessException("Refresh token is required.");
         }
 
-        var user = new User
-        {
-            Id = Guid.NewGuid(),
-            OrganizationId = Guid.NewGuid(),
-            Email = "demo@example.com",
-            Role = Role.Agent,
-            PasswordHash = string.Empty
-        };
-
-        return Task.FromResult(CreateTokenResponse(user));
+        var tokenHash = HashToken(refreshToken);
+        var token = await _refreshTokenRepository.GetActiveByHashAsync(tokenHash, cancellationToken);
+        if (token is null)
+            throw new UnauthorizedAccessException("Refresh token is invalid or expired.");
+        var user = await _userRepository.GetByIdAsync(token.UserId, cancellationToken);
+        if (user is null || !user.IsActive)
+            throw new UnauthorizedAccessException("User account is no longer active.");
+        if (!await _refreshTokenRepository.RevokeAsync(tokenHash, cancellationToken))
+            throw new UnauthorizedAccessException("Refresh token is invalid or expired.");
+        return await CreateTokenResponseAsync(user, cancellationToken);
     }
 
-    public Task LogoutAsync(string refreshToken, CancellationToken cancellationToken)
+    public async Task LogoutAsync(string refreshToken, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(refreshToken))
         {
             throw new UnauthorizedAccessException("Refresh token is required.");
         }
 
-        return Task.CompletedTask;
+        await _refreshTokenRepository.RevokeAsync(HashToken(refreshToken), cancellationToken);
     }
 
-    private LoginResponse CreateTokenResponse(User user)
+    private async Task<LoginResponse> CreateTokenResponseAsync(User user, CancellationToken cancellationToken)
     {
         var issuer = _configuration["Jwt:Issuer"] ?? "https://localhost";
         var audience = _configuration["Jwt:Audience"] ?? "omnichannel";
-        var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? "super-secret-key-for-development-1234567890");
+        var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT signing key is not configured."));
         var expiryMinutes = int.TryParse(_configuration["Jwt:ExpiryMinutes"], out var parsedMinutes) ? parsedMinutes : 60;
 
         var claims = new List<Claim>
@@ -121,7 +123,15 @@ public sealed class AuthService : IAuthService
             expires: DateTime.UtcNow.AddMinutes(expiryMinutes),
             signingCredentials: credentials);
 
-        var refreshToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        var refreshToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
+        await _refreshTokenRepository.CreateAsync(new RefreshToken
+        {
+            UserId = user.Id,
+            TokenHash = HashToken(refreshToken),
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(30)
+        }, cancellationToken);
         return new LoginResponse(new JwtSecurityTokenHandler().WriteToken(token), refreshToken, user.Id, user.OrganizationId, user.Role.ToString());
     }
+
+    private static string HashToken(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
 }

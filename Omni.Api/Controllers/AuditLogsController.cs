@@ -8,7 +8,7 @@ using Omni.Shared.Responses;
 namespace Omni.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Policy = "RequireOrganizationAdmin")]
 [Route("api/[controller]")]
 public sealed class AuditLogsController : ControllerBase
 {
@@ -44,7 +44,7 @@ public sealed class AuditLogsController : ControllerBase
         var auditLog = new AuditLog
         {
             OrganizationId = organizationId,
-            UserId = request.UserId,
+            UserId = GetUserId(),
             Action = request.Action,
             Entity = request.Entity,
             EntityId = request.EntityId,
@@ -61,4 +61,6 @@ public sealed class AuditLogsController : ControllerBase
         var claim = User.Claims.FirstOrDefault(c => c.Type == "OrganizationId");
         return claim is null ? Guid.Empty : Guid.Parse(claim.Value);
     }
+
+    private Guid GetUserId() => Guid.Parse(User.Claims.First(c => c.Type == "UserId").Value);
 }

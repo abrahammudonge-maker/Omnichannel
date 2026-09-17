@@ -1,9 +1,16 @@
 using Omni.Api.Extensions;
+using Omni.Api.Hubs;
 using Omni.Api.Middleware;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseSerilog((context, services, configuration) => configuration
+    .ReadFrom.Configuration(context.Configuration)
+    .ReadFrom.Services(services)
+    .Enrich.FromLogContext()
+    .WriteTo.Console());
 
-builder.Services.AddApplicationServices(builder.Configuration);
+builder.Services.AddApplicationServices(builder.Configuration, builder.Environment.ContentRootPath);
 
 var app = builder.Build();
 
@@ -14,6 +21,7 @@ if (!string.IsNullOrWhiteSpace(pathBase))
 }
 
 app.UseMiddleware<ExceptionMiddleware>();
+app.UseSerilogRequestLogging();
 app.UseHttpsRedirection();
 app.UseRouting();
 
@@ -33,6 +41,7 @@ app.UseCors(policy =>
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 if (app.Environment.IsDevelopment())
 {
@@ -41,6 +50,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapGet("/", () => Results.Ok(new { message = "Omnichannel API is running.", status = "ok" }));
+app.MapHealthChecks("/health");
 app.MapControllers();
+app.MapHub<VoiceHub>("/hubs/voice");
 
 app.Run();

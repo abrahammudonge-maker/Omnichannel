@@ -8,7 +8,7 @@ using Omni.Shared.Responses;
 namespace Omni.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Policy = "RequireAgent")]
 [Route("api/[controller]")]
 public sealed class NotificationsController : ControllerBase
 {
@@ -22,6 +22,8 @@ public sealed class NotificationsController : ControllerBase
     [HttpGet("user/{userId:guid}")]
     public async Task<ActionResult<ApiResponse<IReadOnlyList<Notification>>>> GetByUserId(Guid userId, CancellationToken cancellationToken)
     {
+        if (userId != GetUserId() && !User.IsInRole("OrganizationAdmin") && !User.IsInRole("PlatformSuperAdmin"))
+            return Forbid();
         var organizationId = GetOrganizationId();
         var result = await _notificationRepository.GetByUserIdAsync(userId, organizationId, cancellationToken);
         return Ok(ApiResponse<IReadOnlyList<Notification>>.Ok(result, "Notifications retrieved successfully."));
@@ -35,6 +37,7 @@ public sealed class NotificationsController : ControllerBase
         {
             OrganizationId = organizationId,
             UserId = request.UserId,
+            ConversationId = request.ConversationId,
             Title = request.Title,
             Message = request.Message,
             IsRead = false
@@ -57,4 +60,6 @@ public sealed class NotificationsController : ControllerBase
         var claim = User.Claims.FirstOrDefault(c => c.Type == "OrganizationId");
         return claim is null ? Guid.Empty : Guid.Parse(claim.Value);
     }
+
+    private Guid GetUserId() => Guid.Parse(User.Claims.First(c => c.Type == "UserId").Value);
 }

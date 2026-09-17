@@ -31,4 +31,16 @@ public static class OrganizationSettingQueries
         DELETE FROM organization_settings
         WHERE id = @Id AND organizationid = @OrganizationId;
     ";
+
+    public const string GetByIdPlatformWide = @"
+        SELECT id, organizationid, settingname, settingvalue
+        FROM organization_settings
+        WHERE id = @Id;
+    ";
+
+    public const string GetAllPlatformWide = @"
+        SELECT id, organizationid, settingname, settingvalue
+        FROM organization_settings
+        ORDER BY settingname;
+    ";
 }

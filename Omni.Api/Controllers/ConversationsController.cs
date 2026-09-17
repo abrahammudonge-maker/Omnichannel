@@ -9,15 +9,25 @@ using Omni.Shared.Responses;
 namespace Omni.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Policy = "RequireAgent")]
 [Route("api/[controller]")]
 public sealed class ConversationsController : ControllerBase
 {
     private readonly IConversationRepository _conversationRepository;
+    private readonly ICustomerRepository _customerRepository;
+    private readonly IUserRepository _userRepository;
+    private readonly IChannelAccountRepository _channelAccountRepository;
 
-    public ConversationsController(IConversationRepository conversationRepository)
+    public ConversationsController(
+        IConversationRepository conversationRepository,
+        ICustomerRepository customerRepository,
+        IUserRepository userRepository,
+        IChannelAccountRepository channelAccountRepository)
     {
         _conversationRepository = conversationRepository;
+        _customerRepository = customerRepository;
+        _userRepository = userRepository;
+        _channelAccountRepository = channelAccountRepository;
     }
 
     [HttpGet]
@@ -42,13 +52,31 @@ public sealed class ConversationsController : ControllerBase
     public async Task<ActionResult<ApiResponse<Guid>>> Create([FromBody] CreateConversationRequest request, CancellationToken cancellationToken)
     {
         var organizationId = GetOrganizationId();
+        if (await _customerRepository.GetByIdAsync(request.CustomerId, organizationId, cancellationToken) is null)
+            return BadRequest(ApiResponse<Guid>.Fail("Customer must belong to your organization."));
+        if (!Enum.TryParse<Channel>(request.Channel, true, out var channel))
+            return BadRequest(ApiResponse<Guid>.Fail("Invalid channel."));
+        if (request.Status is not ("Open" or "In Progress" or "Resolved" or "Closed"))
+            return BadRequest(ApiResponse<Guid>.Fail("Invalid conversation status."));
+        if (request.AssignedUserId is Guid userId && await _userRepository.GetByIdAsync(userId, organizationId, cancellationToken) is null)
+            return BadRequest(ApiResponse<Guid>.Fail("Assignee must belong to your organization."));
+
+        Guid? channelAccountId = request.ChannelAccountId;
+        if (channelAccountId is Guid requestedAccountId)
+        {
+            var account = await _channelAccountRepository.GetByIdAsync(requestedAccountId, organizationId, cancellationToken);
+            if (account is null || account.ChannelType != request.Channel)
+                return BadRequest(ApiResponse<Guid>.Fail("The selected channel account is invalid for this channel."));
+        }
+
         var conversation = new Conversation
         {
             OrganizationId = organizationId,
             CustomerId = request.CustomerId,
-            Channel = Enum.Parse<Channel>(request.Channel),
+            Channel = channel,
             Status = request.Status,
-            AssignedUserId = request.AssignedUserId
+            AssignedUserId = request.AssignedUserId,
+            ChannelAccountId = channelAccountId
         };
 
         var id = await _conversationRepository.CreateAsync(conversation, cancellationToken);

@@ -7,6 +7,7 @@ public sealed class Message
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid OrganizationId { get; set; }
     public Guid ConversationId { get; set; }
+    public string? ExternalMessageId { get; set; }
     public string Direction { get; set; } = "Inbound";
     public string MessageType { get; set; } = "Text";
     public string Body { get; set; } = string.Empty;

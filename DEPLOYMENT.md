@@ -147,6 +147,7 @@ logging silently produces nothing without it.
 
 ```powershell
 Invoke-WebRequest -Uri "https://test.servicesuitecloud.com/omnichannel-api/" -UseBasicParsing
+Invoke-WebRequest -Uri "https://test.servicesuitecloud.com/omnichannel-api/health" -UseBasicParsing
 Invoke-WebRequest -Uri "https://test.servicesuitecloud.com/omnichannel/" -UseBasicParsing
 ```
 
@@ -171,6 +172,13 @@ Get-EventLog -LogName Application -Source "IIS AspNetCore Module V2" -Newest 5 |
 1. Settings → Channels → reconnect email with the rotated Gmail app password.
 2. For WhatsApp/Messenger/Instagram: in the Meta App Dashboard, set the
    webhook URL to `https://test.servicesuitecloud.com/omnichannel-api/api/webhooks/meta`.
+3. Before deploying the WhatsApp hardening changes to an existing database,
+  run `deploy-artifacts\WhatsAppHardeningMigration.sql` against the
+  `omnichannel` database. A fresh database receives these columns from
+  `InitialSchema.sql`.
+4. Run `deploy-artifacts\AuthAndWorkflowMigration.sql` against the same
+   database to enable revocable refresh tokens. A fresh database already
+   receives the table from `InitialSchema.sql`.
 
 ---
 

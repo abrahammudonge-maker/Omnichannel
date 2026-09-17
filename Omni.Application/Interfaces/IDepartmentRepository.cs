@@ -6,6 +6,10 @@ public interface IDepartmentRepository
 {
     Task<Department?> GetByIdAsync(Guid id, Guid organizationId, CancellationToken cancellationToken);
     Task<IReadOnlyList<Department>> GetAllAsync(Guid organizationId, CancellationToken cancellationToken);
+
+    /// <summary>Platform-wide lookups (not scoped to an organization) for the platform admin dashboard.</summary>
+    Task<Department?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
+    Task<IReadOnlyList<Department>> GetAllAsync(CancellationToken cancellationToken);
     Task<Guid> CreateAsync(Department department, CancellationToken cancellationToken);
     Task UpdateAsync(Department department, CancellationToken cancellationToken);
     Task DeleteAsync(Guid id, Guid organizationId, CancellationToken cancellationToken);

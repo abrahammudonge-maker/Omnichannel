@@ -82,6 +82,7 @@ CREATE TABLE conversations (
     id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
     organizationid UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id),
     customerid UNIQUEIDENTIFIER NOT NULL REFERENCES customers(id),
+    channelaccountid UNIQUEIDENTIFIER,
     channel SMALLINT NOT NULL,
     status NVARCHAR(50) NOT NULL DEFAULT 'Open',
     assigneduserid UNIQUEIDENTIFIER REFERENCES users(id),
@@ -118,6 +119,7 @@ CREATE TABLE messages (
     id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
     organizationid UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id),
     conversationid UNIQUEIDENTIFIER NOT NULL REFERENCES conversations(id),
+    externalmessageid NVARCHAR(200),
     direction NVARCHAR(20) NOT NULL DEFAULT 'Inbound',
     messagetype NVARCHAR(20) NOT NULL DEFAULT 'Text',
     body NVARCHAR(MAX) NOT NULL,
@@ -127,6 +129,18 @@ CREATE TABLE messages (
 );
 CREATE INDEX idx_messages_organizationid ON messages(organizationid);
 CREATE INDEX idx_messages_conversationid ON messages(conversationid);
+CREATE UNIQUE INDEX idx_messages_externalmessageid ON messages(organizationid, externalmessageid) WHERE externalmessageid IS NOT NULL;
+GO
+
+CREATE TABLE refresh_tokens (
+    id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    userid UNIQUEIDENTIFIER NOT NULL REFERENCES users(id),
+    tokenhash NVARCHAR(128) NOT NULL UNIQUE,
+    expiresat DATETIMEOFFSET NOT NULL,
+    createdat DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+    revokedat DATETIMEOFFSET NULL
+);
+CREATE INDEX idx_refresh_tokens_userid ON refresh_tokens(userid);
 GO
 
 CREATE TABLE tags (
@@ -155,7 +169,7 @@ CREATE TABLE attachments (
     contenttype NVARCHAR(150) NOT NULL,
     filesize BIGINT NOT NULL,
     storagepath NVARCHAR(500) NOT NULL,
-    uploadedby UNIQUEIDENTIFIER NOT NULL REFERENCES users(id),
+    uploadedby UNIQUEIDENTIFIER REFERENCES users(id),
     uploadedat DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET()
 );
 CREATE INDEX idx_attachments_conversationid ON attachments(conversationid);
@@ -177,6 +191,7 @@ CREATE TABLE notifications (
     id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
     organizationid UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id),
     userid UNIQUEIDENTIFIER NOT NULL REFERENCES users(id),
+    conversationid UNIQUEIDENTIFIER REFERENCES conversations(id),
     title NVARCHAR(200) NOT NULL,
     message NVARCHAR(MAX) NOT NULL,
     isread BIT NOT NULL DEFAULT 0,
@@ -214,6 +229,7 @@ CREATE TABLE channel_accounts (
     channeltype NVARCHAR(50) NOT NULL,
     displayname NVARCHAR(200) NOT NULL,
     externalaccountid NVARCHAR(200),
+    externalwabaid NVARCHAR(200),
     accesstoken NVARCHAR(MAX),
     refreshtoken NVARCHAR(MAX),
     webhooksecret NVARCHAR(300),
@@ -226,4 +242,122 @@ CREATE TABLE channel_accounts (
     updatedat DATETIMEOFFSET
 );
 CREATE INDEX idx_channel_accounts_organizationid ON channel_accounts(organizationid);
+GO
+
+CREATE TABLE message_templates (
+    id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    organizationid UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id),
+    channelaccountid UNIQUEIDENTIFIER NOT NULL REFERENCES channel_accounts(id),
+    name NVARCHAR(512) NOT NULL,
+    language NVARCHAR(20) NOT NULL,
+    category NVARCHAR(50) NOT NULL,
+    status NVARCHAR(20) NOT NULL DEFAULT 'Pending',
+    bodytext NVARCHAR(MAX) NOT NULL DEFAULT '',
+    componentsjson NVARCHAR(MAX) NOT NULL DEFAULT '[]',
+    createdat DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+    updatedat DATETIMEOFFSET
+);
+CREATE INDEX idx_message_templates_organizationid ON message_templates(organizationid);
+CREATE UNIQUE INDEX idx_message_templates_channelaccount_name_language ON message_templates(channelaccountid, name, language);
+GO
+
+CREATE TABLE api_keys (
+    id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    organizationid UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id),
+    name NVARCHAR(200) NOT NULL,
+    keyhash NVARCHAR(128) NOT NULL UNIQUE,
+    keyprefix NVARCHAR(20) NOT NULL,
+    createdat DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+    lastusedat DATETIMEOFFSET NULL,
+    revokedat DATETIMEOFFSET NULL
+);
+CREATE INDEX idx_api_keys_organizationid ON api_keys(organizationid);
+GO
+
+CREATE TABLE phone_numbers (
+    id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    organizationid UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id),
+    number NVARCHAR(32) NOT NULL,
+    provider NVARCHAR(50) NOT NULL,
+    providernumberid NVARCHAR(200) NULL,
+    displayname NVARCHAR(200) NOT NULL,
+    country NVARCHAR(2) NULL,
+    status NVARCHAR(20) NOT NULL DEFAULT 'Active',
+    createdat DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+    updatedat DATETIMEOFFSET NULL
+);
+CREATE INDEX idx_phone_numbers_organizationid ON phone_numbers(organizationid);
+CREATE UNIQUE INDEX idx_phone_numbers_number ON phone_numbers(number);
+GO
+
+CREATE TABLE call_queues (
+    id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    organizationid UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id),
+    departmentid UNIQUEIDENTIFIER NULL REFERENCES departments(id),
+    name NVARCHAR(200) NOT NULL,
+    description NVARCHAR(500) NULL,
+    strategy NVARCHAR(20) NOT NULL DEFAULT 'RoundRobin',
+    isactive BIT NOT NULL DEFAULT 1,
+    createdat DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET()
+);
+CREATE INDEX idx_call_queues_organizationid ON call_queues(organizationid);
+GO
+
+CREATE TABLE call_queue_members (
+    id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    organizationid UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id),
+    queueid UNIQUEIDENTIFIER NOT NULL REFERENCES call_queues(id),
+    userid UNIQUEIDENTIFIER NOT NULL REFERENCES users(id),
+    priority INT NOT NULL DEFAULT 0,
+    isactive BIT NOT NULL DEFAULT 1,
+    createdat DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET()
+);
+CREATE INDEX idx_call_queue_members_organizationid ON call_queue_members(organizationid);
+CREATE INDEX idx_call_queue_members_queueid ON call_queue_members(queueid);
+CREATE UNIQUE INDEX idx_call_queue_members_queue_user ON call_queue_members(queueid, userid);
+GO
+
+CREATE TABLE calls (
+    id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    organizationid UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id),
+    customerid UNIQUEIDENTIFIER NOT NULL REFERENCES customers(id),
+    conversationid UNIQUEIDENTIFIER NULL REFERENCES conversations(id),
+    agentid UNIQUEIDENTIFIER NULL REFERENCES users(id),
+    provider NVARCHAR(50) NOT NULL,
+    providercallid NVARCHAR(200) NULL,
+    direction NVARCHAR(20) NOT NULL,
+    fromnumber NVARCHAR(32) NOT NULL,
+    tonumber NVARCHAR(32) NOT NULL,
+    status NVARCHAR(20) NOT NULL DEFAULT 'Ringing',
+    startedat DATETIMEOFFSET NULL,
+    answeredat DATETIMEOFFSET NULL,
+    endedat DATETIMEOFFSET NULL,
+    durationseconds INT NULL,
+    recordingurl NVARCHAR(1000) NULL,
+    recordingstatus NVARCHAR(20) NOT NULL DEFAULT 'NotRecorded',
+    createdat DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+    updatedat DATETIMEOFFSET NULL
+);
+CREATE INDEX idx_calls_organizationid ON calls(organizationid);
+CREATE INDEX idx_calls_customerid ON calls(customerid, organizationid);
+CREATE INDEX idx_calls_conversationid ON calls(conversationid, organizationid);
+CREATE INDEX idx_calls_agentid ON calls(agentid, organizationid);
+CREATE INDEX idx_calls_createdat ON calls(createdat DESC);
+-- The webhook path looks up an existing call by (provider, providercallid) on every single callback,
+-- so this is the index that matters most for webhook latency.
+CREATE UNIQUE INDEX idx_calls_provider_providercallid ON calls(provider, providercallid) WHERE providercallid IS NOT NULL;
+GO
+
+CREATE TABLE call_events (
+    id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    organizationid UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id),
+    callid UNIQUEIDENTIFIER NOT NULL REFERENCES calls(id),
+    eventtype NVARCHAR(100) NOT NULL,
+    providereventid NVARCHAR(200) NULL,
+    payload NVARCHAR(MAX) NOT NULL,
+    createdat DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET()
+);
+CREATE INDEX idx_call_events_organizationid ON call_events(organizationid);
+CREATE INDEX idx_call_events_callid ON call_events(callid, organizationid);
+CREATE INDEX idx_call_events_createdat ON call_events(createdat DESC);
 GO

@@ -48,6 +48,19 @@ public sealed class OrganizationSettingRepository : IOrganizationSettingReposito
         return await connection.QuerySingleOrDefaultAsync<OrganizationSetting>(OrganizationSettingQueries.GetById, new { Id = id, OrganizationId = organizationId });
     }
 
+    public async Task<OrganizationSetting?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        return await connection.QuerySingleOrDefaultAsync<OrganizationSetting>(OrganizationSettingQueries.GetByIdPlatformWide, new { Id = id });
+    }
+
+    public async Task<IReadOnlyList<OrganizationSetting>> GetAllAsync(CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        var result = await connection.QueryAsync<OrganizationSetting>(OrganizationSettingQueries.GetAllPlatformWide);
+        return result.ToList();
+    }
+
     public async Task UpdateAsync(OrganizationSetting setting, CancellationToken cancellationToken)
     {
         using var connection = _connectionFactory.CreateConnection();

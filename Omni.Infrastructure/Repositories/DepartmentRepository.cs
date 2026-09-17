@@ -50,6 +50,19 @@ public sealed class DepartmentRepository : IDepartmentRepository
         return await connection.QuerySingleOrDefaultAsync<Department>(DepartmentQueries.GetById, new { Id = id, OrganizationId = organizationId });
     }
 
+    public async Task<Department?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        return await connection.QuerySingleOrDefaultAsync<Department>(DepartmentQueries.GetByIdPlatformWide, new { Id = id });
+    }
+
+    public async Task<IReadOnlyList<Department>> GetAllAsync(CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        var result = await connection.QueryAsync<Department>(DepartmentQueries.GetAllPlatformWide);
+        return result.ToList();
+    }
+
     public async Task UpdateAsync(Department department, CancellationToken cancellationToken)
     {
         department.UpdatedAt = DateTimeOffset.UtcNow;
