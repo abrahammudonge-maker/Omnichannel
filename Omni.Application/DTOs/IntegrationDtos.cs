@@ -10,3 +10,5 @@ public sealed record SendIntegrationMessageRequest(string PhoneNumber, string Bo
 public sealed record SendIntegrationMessageResponse(Guid ConversationId, Guid MessageId, string? ExternalMessageId, string? AttachmentUrl = null);
 
 public sealed record IntegrationTemplateView(Guid Id, string Name, string Language, string Category, string BodyText, int ParameterCount);
+
+public sealed record SetIntegrationWebhookRequest(string WebhookUrl, string WebhookSecret);

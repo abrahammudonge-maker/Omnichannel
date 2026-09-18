@@ -28,6 +28,7 @@ public sealed class IntegrationsController : ControllerBase
     private readonly IConversationRepository _conversationRepository;
     private readonly IMessageRepository _messageRepository;
     private readonly IAttachmentRepository _attachmentRepository;
+    private readonly IOrganizationSettingRepository _organizationSettingRepository;
     private readonly ITemplateMessageService _templateMessageService;
     private readonly IMetaMessageSender _metaMessageSender;
     private readonly IWebHostEnvironment _environment;
@@ -40,6 +41,7 @@ public sealed class IntegrationsController : ControllerBase
         IConversationRepository conversationRepository,
         IMessageRepository messageRepository,
         IAttachmentRepository attachmentRepository,
+        IOrganizationSettingRepository organizationSettingRepository,
         ITemplateMessageService templateMessageService,
         IMetaMessageSender metaMessageSender,
         IWebHostEnvironment environment,
@@ -51,10 +53,57 @@ public sealed class IntegrationsController : ControllerBase
         _conversationRepository = conversationRepository;
         _messageRepository = messageRepository;
         _attachmentRepository = attachmentRepository;
+        _organizationSettingRepository = organizationSettingRepository;
         _templateMessageService = templateMessageService;
         _metaMessageSender = metaMessageSender;
         _environment = environment;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Lets the calling integration configure its own inbound-forwarding webhook, instead of an org
+    /// admin having to paste IntegrationWebhookUrl/IntegrationWebhookSecret into Settings by hand.
+    /// Safe to expose on the API key: the key is already scoped to exactly this organization, the same
+    /// way every other endpoint here resolves organizationId from it.
+    /// </summary>
+    [HttpPut("webhook-settings")]
+    public async Task<ActionResult<ApiResponse>> SetWebhookSettings([FromBody] SetIntegrationWebhookRequest request, CancellationToken cancellationToken)
+    {
+        var organizationId = GetOrganizationId();
+        if (string.IsNullOrWhiteSpace(request.WebhookUrl) || !Uri.TryCreate(request.WebhookUrl, UriKind.Absolute, out _))
+        {
+            return BadRequest(ApiResponse.Fail("A valid webhookUrl is required."));
+        }
+        if (string.IsNullOrWhiteSpace(request.WebhookSecret))
+        {
+            return BadRequest(ApiResponse.Fail("webhookSecret is required."));
+        }
+
+        await UpsertSettingAsync(organizationId, "IntegrationWebhookUrl", request.WebhookUrl, cancellationToken);
+        await UpsertSettingAsync(organizationId, "IntegrationWebhookSecret", request.WebhookSecret, cancellationToken);
+
+        return Ok(ApiResponse.Ok("Webhook settings saved."));
+    }
+
+    private async Task UpsertSettingAsync(Guid organizationId, string name, string value, CancellationToken cancellationToken)
+    {
+        var existing = (await _organizationSettingRepository.GetAllAsync(organizationId, cancellationToken))
+            .FirstOrDefault(s => string.Equals(s.SettingName, name, StringComparison.OrdinalIgnoreCase));
+
+        if (existing is not null)
+        {
+            existing.SettingValue = value;
+            await _organizationSettingRepository.UpdateAsync(existing, cancellationToken);
+        }
+        else
+        {
+            await _organizationSettingRepository.CreateAsync(new OrganizationSetting
+            {
+                OrganizationId = organizationId,
+                SettingName = name,
+                SettingValue = value
+            }, cancellationToken);
+        }
     }
 
     /// <summary>Lists this organization's approved WhatsApp templates, for building a template picker in an external UI.</summary>
