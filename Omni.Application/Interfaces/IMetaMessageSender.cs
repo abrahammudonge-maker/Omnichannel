@@ -35,4 +35,22 @@ public interface IMetaMessageSender
         string category,
         IReadOnlyList<string> bodyParameters,
         CancellationToken cancellationToken);
+
+    Task<MetaMessageSendResult> SendWhatsAppLocationAsync(
+        string accessToken,
+        string phoneNumberId,
+        string recipientId,
+        double latitude,
+        double longitude,
+        string? name,
+        string? address,
+        CancellationToken cancellationToken);
+
+    Task<MetaMessageSendResult> SendWhatsAppContactAsync(
+        string accessToken,
+        string phoneNumberId,
+        string recipientId,
+        string formattedName,
+        IReadOnlyList<string> phoneNumbers,
+        CancellationToken cancellationToken);
 }

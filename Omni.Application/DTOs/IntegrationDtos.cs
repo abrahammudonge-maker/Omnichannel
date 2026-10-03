@@ -12,3 +12,6 @@ public sealed record SendIntegrationMessageResponse(Guid ConversationId, Guid Me
 public sealed record IntegrationTemplateView(Guid Id, string Name, string Language, string Category, string BodyText, int ParameterCount);
 
 public sealed record SetIntegrationWebhookRequest(string WebhookUrl, string WebhookSecret);
+
+public sealed record SendIntegrationLocationRequest(string PhoneNumber, double Latitude, double Longitude, string? Name = null, string? Address = null, string? CustomerName = null);
+public sealed record SendIntegrationContactRequest(string PhoneNumber, string FormattedName, List<string> PhoneNumbers, string? CustomerName = null);

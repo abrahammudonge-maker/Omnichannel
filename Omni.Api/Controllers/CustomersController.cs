@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Omni.Application.DTOs;
 using Omni.Application.Interfaces;
 using Omni.Domain.Entities;
+using Omni.Domain.ValueObjects;
 using Omni.Shared.Responses;
 
 namespace Omni.Api.Controllers;
@@ -39,7 +40,7 @@ public sealed class CustomersController : ControllerBase
             Email = request.Email,
             FacebookId = request.FacebookId,
             InstagramId = request.InstagramId,
-            WhatsAppNumber = request.WhatsAppNumber
+            WhatsAppNumber = WhatsAppNumber.Normalize(request.WhatsAppNumber)
         };
 
         var id = await _customerRepository.CreateAsync(customer, cancellationToken);
@@ -63,7 +64,7 @@ public sealed class CustomersController : ControllerBase
         customer.Email = request.Email;
         customer.FacebookId = request.FacebookId;
         customer.InstagramId = request.InstagramId;
-        customer.WhatsAppNumber = request.WhatsAppNumber;
+        customer.WhatsAppNumber = WhatsAppNumber.Normalize(request.WhatsAppNumber);
         await _customerRepository.UpdateAsync(customer, cancellationToken);
         return Ok(ApiResponse.Ok("Customer updated successfully."));
     }

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -9,8 +10,14 @@ namespace Omni.Infrastructure.Providers;
 
 public sealed class GraphApiMessageSender : IMetaMessageSender
 {
+    // Meta throttles each sending number; spacing sends per number keeps bulk template runs
+    // from tripping rate limits or looking like spam, which also protects the number from bans.
+    private static readonly TimeSpan MinSendInterval = TimeSpan.FromMilliseconds(200);
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly MetaSettings _settings;
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _pacingGates = new();
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _nextSendSlotByNumber = new();
 
     public GraphApiMessageSender(IHttpClientFactory httpClientFactory, IOptions<MetaSettings> settings)
     {
@@ -27,6 +34,7 @@ public sealed class GraphApiMessageSender : IMetaMessageSender
         MetaOutboundAttachment? attachment,
         CancellationToken cancellationToken)
     {
+        await PaceAsync(platformId, cancellationToken);
         var client = _httpClientFactory.CreateClient("GraphApi");
 
         if (attachment is null)
@@ -53,6 +61,7 @@ public sealed class GraphApiMessageSender : IMetaMessageSender
         IReadOnlyList<string> bodyParameters,
         CancellationToken cancellationToken)
     {
+        await PaceAsync(phoneNumberId, cancellationToken);
         var template = new Dictionary<string, object>
         {
             ["name"] = templateName,
@@ -107,6 +116,84 @@ public sealed class GraphApiMessageSender : IMetaMessageSender
         var client = _httpClientFactory.CreateClient("GraphApi");
         var messageId = await PostMessageAsync(client, accessToken, phoneNumberId, payload, cancellationToken);
         return new MetaMessageSendResult(messageId);
+    }
+
+    public async Task<MetaMessageSendResult> SendWhatsAppLocationAsync(
+        string accessToken,
+        string phoneNumberId,
+        string recipientId,
+        double latitude,
+        double longitude,
+        string? name,
+        string? address,
+        CancellationToken cancellationToken)
+    {
+        await PaceAsync(phoneNumberId, cancellationToken);
+        var payload = JsonSerializer.Serialize(new
+        {
+            messaging_product = "whatsapp",
+            to = recipientId,
+            type = "location",
+            location = new
+            {
+                latitude = latitude.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                longitude = longitude.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                name,
+                address
+            }
+        });
+
+        var client = _httpClientFactory.CreateClient("GraphApi");
+        return new MetaMessageSendResult(await PostMessageAsync(client, accessToken, phoneNumberId, payload, cancellationToken));
+    }
+
+    public async Task<MetaMessageSendResult> SendWhatsAppContactAsync(
+        string accessToken,
+        string phoneNumberId,
+        string recipientId,
+        string formattedName,
+        IReadOnlyList<string> phoneNumbers,
+        CancellationToken cancellationToken)
+    {
+        await PaceAsync(phoneNumberId, cancellationToken);
+        var payload = JsonSerializer.Serialize(new
+        {
+            messaging_product = "whatsapp",
+            to = recipientId,
+            type = "contacts",
+            contacts = new[]
+            {
+                new
+                {
+                    name = new { formatted_name = formattedName, first_name = formattedName },
+                    phones = phoneNumbers.Select(p => new { phone = p, type = "CELL" }).ToArray()
+                }
+            }
+        });
+
+        var client = _httpClientFactory.CreateClient("GraphApi");
+        return new MetaMessageSendResult(await PostMessageAsync(client, accessToken, phoneNumberId, payload, cancellationToken));
+    }
+
+    private async Task PaceAsync(string sendingNumberId, CancellationToken cancellationToken)
+    {
+        var gate = _pacingGates.GetOrAdd(sendingNumberId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            var slot = _nextSendSlotByNumber.TryGetValue(sendingNumberId, out var reserved) && reserved > now ? reserved : now;
+            _nextSendSlotByNumber[sendingNumberId] = slot + MinSendInterval;
+            var wait = slot - now;
+            if (wait > TimeSpan.Zero)
+            {
+                await Task.Delay(wait, cancellationToken);
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     private async Task<string> SendTextAsync(HttpClient client, string channelType, string accessToken, string platformId, string recipientId, string body, CancellationToken cancellationToken)

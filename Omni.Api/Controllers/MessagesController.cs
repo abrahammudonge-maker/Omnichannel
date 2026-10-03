@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Omni.Application.DTOs;
 using Omni.Application.Interfaces;
+using Omni.Application.Services;
 using Omni.Domain.Entities;
 using Omni.Domain.Enums;
+using Omni.Domain.ValueObjects;
 using Omni.Shared.Responses;
 
 namespace Omni.Api.Controllers;
@@ -24,6 +26,7 @@ public sealed class MessagesController : ControllerBase
     private readonly IEmailSender _emailSender;
     private readonly IMetaMessageSender _metaMessageSender;
     private readonly ISmsSender _smsSender;
+    private readonly IWhatsAppContactResolver _contactResolver;
     private readonly ILogger<MessagesController> _logger;
 
     public MessagesController(
@@ -33,6 +36,7 @@ public sealed class MessagesController : ControllerBase
         IChannelAccountRepository channelAccountRepository,
         IMessageTemplateRepository messageTemplateRepository,
         ITemplateMessageService templateMessageService,
+        IWhatsAppContactResolver contactResolver,
         IAttachmentRepository attachmentRepository,
         IEmailSender emailSender,
         IMetaMessageSender metaMessageSender,
@@ -45,6 +49,7 @@ public sealed class MessagesController : ControllerBase
         _channelAccountRepository = channelAccountRepository;
         _messageTemplateRepository = messageTemplateRepository;
         _templateMessageService = templateMessageService;
+        _contactResolver = contactResolver;
         _attachmentRepository = attachmentRepository;
         _emailSender = emailSender;
         _metaMessageSender = metaMessageSender;
@@ -122,6 +127,111 @@ public sealed class MessagesController : ControllerBase
         }
 
         return Ok(ApiResponse<Guid>.Ok(id, "Message created successfully."));
+    }
+
+    /// <summary>
+    /// Sends one approved template to many WhatsApp numbers in a single request. Each recipient gets a
+    /// result, so a bad number doesn't stop the rest. Sends are paced per sending number by the sender.
+    /// </summary>
+    [HttpPost("bulk-template")]
+    [EnableRateLimiting("messages")]
+    public async Task<ActionResult<ApiResponse<SendBulkTemplateResponse>>> SendBulkTemplate([FromBody] SendBulkTemplateRequest request, CancellationToken cancellationToken)
+    {
+        const int maxRecipients = 500;
+        var organizationId = GetOrganizationId();
+        if (request.Recipients is null || request.Recipients.Count == 0)
+            return BadRequest(ApiResponse<SendBulkTemplateResponse>.Fail("Add at least one recipient."));
+        if (request.Recipients.Count > maxRecipients)
+            return BadRequest(ApiResponse<SendBulkTemplateResponse>.Fail($"Send at most {maxRecipients} recipients at a time."));
+
+        var template = await _messageTemplateRepository.GetByIdAsync(request.TemplateId, organizationId, cancellationToken);
+        if (template is null) return NotFound(ApiResponse<SendBulkTemplateResponse>.Fail("Template not found."));
+        if (!string.Equals(template.Status, "APPROVED", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(ApiResponse<SendBulkTemplateResponse>.Fail($"This template isn't approved yet (status: {template.Status})."));
+
+        var account = await _channelAccountRepository.GetByIdAsync(template.ChannelAccountId, organizationId, cancellationToken);
+        if (account is null || account.Status != "Active" || string.IsNullOrWhiteSpace(account.AccessToken) || string.IsNullOrWhiteSpace(account.ExternalAccountId))
+            return BadRequest(ApiResponse<SendBulkTemplateResponse>.Fail("The WhatsApp channel this template belongs to is no longer connected."));
+
+        var results = new List<BulkTemplateRecipientResult>();
+        var seenNumbers = new HashSet<string>();
+        foreach (var recipient in request.Recipients)
+        {
+            var number = WhatsAppNumber.Normalize(recipient.PhoneNumber);
+            if (number is null)
+            {
+                results.Add(new BulkTemplateRecipientResult(recipient.PhoneNumber ?? string.Empty, false, null, "Not a valid WhatsApp number."));
+                continue;
+            }
+            if (!seenNumbers.Add(number))
+            {
+                results.Add(new BulkTemplateRecipientResult(number, false, null, "Listed more than once — skipped."));
+                continue;
+            }
+
+            var customer = await _contactResolver.FindOrCreateCustomerAsync(organizationId, number, recipient.CustomerName, cancellationToken);
+            var conversation = await _contactResolver.FindOrCreateConversationAsync(organizationId, customer.Id, account.Id, cancellationToken);
+            var sendResult = await _templateMessageService.SendAsync(
+                organizationId, conversation.Id, account, template, number, recipient.BodyParameters ?? new List<string>(), cancellationToken);
+            results.Add(new BulkTemplateRecipientResult(number, sendResult.Success, sendResult.ExternalMessageId, sendResult.ErrorMessage));
+        }
+
+        var sent = results.Count(r => r.Success);
+        return Ok(ApiResponse<SendBulkTemplateResponse>.Ok(
+            new SendBulkTemplateResponse(sent, results.Count - sent, results), $"Sent {sent} of {results.Count}."));
+    }
+
+    /// <summary>Shares a location pin with a WhatsApp customer. Subject to the same 24-hour window as free-text replies.</summary>
+    [HttpPost("location")]
+    [EnableRateLimiting("messages")]
+    public async Task<ActionResult<ApiResponse<Guid>>> SendLocation([FromBody] SendLocationMessageRequest request, CancellationToken cancellationToken)
+    {
+        var organizationId = GetOrganizationId();
+        var conversation = await _conversationRepository.GetByIdAsync(request.ConversationId, organizationId, cancellationToken);
+        if (conversation is null) return NotFound(ApiResponse<Guid>.Fail("Conversation not found."));
+        if (conversation.Channel != Channel.WhatsApp) return BadRequest(ApiResponse<Guid>.Fail("Location pins are only supported on WhatsApp conversations."));
+
+        var customer = await _customerRepository.GetByIdAsync(conversation.CustomerId, organizationId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(customer?.WhatsAppNumber)) return BadRequest(ApiResponse<Guid>.Fail("This customer has no WhatsApp number on file."));
+
+        var channelAccounts = await _channelAccountRepository.GetAllAsync(organizationId, cancellationToken);
+        var account = channelAccounts.FirstOrDefault(a => a.Id == conversation.ChannelAccountId && a.ChannelType == "WhatsApp" && a.Status == "Active"
+            && !string.IsNullOrWhiteSpace(a.ExternalAccountId) && !string.IsNullOrWhiteSpace(a.AccessToken));
+        if (account is null) return BadRequest(ApiResponse<Guid>.Fail("No active WhatsApp channel is connected for this conversation."));
+
+        var lastInboundSentAt = await _messageRepository.GetLastInboundSentAtAsync(conversation.Id, organizationId, cancellationToken);
+        if (lastInboundSentAt is null || DateTimeOffset.UtcNow - lastInboundSentAt.Value > TimeSpan.FromHours(24))
+        {
+            return BadRequest(ApiResponse<Guid>.Fail("This customer hasn't messaged in the last 24 hours, so a location pin can't be sent outside WhatsApp's reply window."));
+        }
+
+        var message = new Message
+        {
+            OrganizationId = organizationId,
+            ConversationId = conversation.Id,
+            Direction = "Outbound",
+            MessageType = "Location",
+            Body = LocationText.Format(request.Latitude, request.Longitude, request.Name, request.Address),
+            Status = "Queued"
+        };
+        var id = await _messageRepository.CreateAsync(message, cancellationToken);
+
+        try
+        {
+            var result = await _metaMessageSender.SendWhatsAppLocationAsync(
+                account.AccessToken!, account.ExternalAccountId!, customer.WhatsAppNumber!, request.Latitude, request.Longitude, request.Name, request.Address, cancellationToken);
+            message.ExternalMessageId = result.ExternalMessageId;
+            message.Status = "Sent";
+            await _messageRepository.UpdateAsync(message, cancellationToken);
+            return Ok(ApiResponse<Guid>.Ok(id, "Location sent."));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send WhatsApp location for conversation {ConversationId}", conversation.Id);
+            message.Status = "Failed";
+            await _messageRepository.UpdateAsync(message, cancellationToken);
+            return Ok(ApiResponse<Guid>.Fail($"Location saved, but not delivered. {ex.Message}"));
+        }
     }
 
     /// <summary>

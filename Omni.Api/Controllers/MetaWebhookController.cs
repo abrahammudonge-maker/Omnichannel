@@ -8,6 +8,7 @@ using Omni.Application.Configuration;
 using Omni.Application.Interfaces;
 using Omni.Domain.Entities;
 using Omni.Domain.Enums;
+using Omni.Domain.ValueObjects;
 
 namespace Omni.Api.Controllers;
 
@@ -97,6 +98,11 @@ public sealed class MetaWebhookController : ControllerBase
             {
                 return Unauthorized();
             }
+
+            // Temporary delivery diagnostics: Meta sends the actual reason for a rejected WhatsApp
+            // delivery only in this signed webhook callback. Log it after signature verification so
+            // an unauthenticated caller cannot inject arbitrary log data.
+            _logger.LogWarning("Verified Meta webhook payload: {Payload}", rawBody);
 
             using var document = JsonDocument.Parse(rawBody);
             var payload = document.RootElement;
@@ -325,6 +331,20 @@ public sealed class MetaWebhookController : ControllerBase
                         var deliveryStatus = statusValue.GetString();
                         if (!string.IsNullOrWhiteSpace(externalMessageId) && !string.IsNullOrWhiteSpace(deliveryStatus))
                         {
+                            // A successful POST to /messages only means Meta accepted the request.  The
+                            // actual delivery failure (including its Meta error code/details) arrives here.
+                            // Previously we discarded it, leaving the inbox with only a red failed icon.
+                            if (string.Equals(deliveryStatus, "failed", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var errors = status.TryGetProperty("errors", out var errorsProp)
+                                    ? errorsProp.GetRawText()
+                                    : "no error details supplied by Meta";
+                                _logger.LogWarning(
+                                    "WhatsApp delivery failed for message {ExternalMessageId}. Meta errors: {MetaErrors}",
+                                    externalMessageId,
+                                    errors);
+                            }
+
                             await _messageRepository.UpdateStatusByExternalMessageIdAsync(externalMessageId, organizationId, deliveryStatus, cancellationToken);
                             await _inboundMessageForwarder.ForwardStatusUpdateAsync(organizationId, externalMessageId, deliveryStatus, cancellationToken);
                         }
@@ -374,6 +394,7 @@ public sealed class MetaWebhookController : ControllerBase
                 var whatsAppType = msg.TryGetProperty("type", out var typeProp) ? typeProp.GetString() : null;
 
                 string? body = null;
+                string nonMediaType = "Text";
                 string? mediaId = null, mimeType = null, mediaFilename = null, caption = null;
 
                 if (whatsAppType == "text" && msg.TryGetProperty("text", out var textObj) && textObj.TryGetProperty("body", out var bodyProp))
@@ -388,9 +409,19 @@ public sealed class MetaWebhookController : ControllerBase
                     mediaFilename = mediaObj.TryGetProperty("filename", out var filenameProp) ? filenameProp.GetString() : null;
                     caption = mediaObj.TryGetProperty("caption", out var captionProp) ? captionProp.GetString() : null;
                 }
+                else if (whatsAppType == "location" && msg.TryGetProperty("location", out var locationObj))
+                {
+                    body = DescribeLocation(locationObj);
+                    nonMediaType = "Location";
+                }
+                else if (whatsAppType == "contacts" && msg.TryGetProperty("contacts", out var contactsObj))
+                {
+                    body = DescribeContacts(contactsObj);
+                    nonMediaType = "Contact";
+                }
                 else
                 {
-                    continue; // ignore unsupported message types (location, contacts, reactions, interactive, etc.)
+                    continue; // reactions, interactive replies, system events, etc. aren't shown in the inbox
                 }
 
                 var (customer, conversation) = await ResolveCustomerAndConversationAsync(organizationId, "WhatsAppNumber", from, displayName, account.Id, Channel.WhatsApp, cancellationToken);
@@ -407,10 +438,39 @@ public sealed class MetaWebhookController : ControllerBase
                 }
                 else
                 {
-                    await CreateInboundMessageAsync(organizationId, customer, conversation, externalMessageId, "Text", body ?? string.Empty, null, cancellationToken);
+                    await CreateInboundMessageAsync(organizationId, customer, conversation, externalMessageId, nonMediaType, body ?? string.Empty, null, cancellationToken);
                 }
             }
         }
+    }
+
+    private static string DescribeLocation(JsonElement location)
+    {
+        var latitude = location.TryGetProperty("latitude", out var lat) ? lat.GetRawText() : "?";
+        var longitude = location.TryGetProperty("longitude", out var lng) ? lng.GetRawText() : "?";
+        var name = location.TryGetProperty("name", out var n) ? n.GetString() : null;
+        var address = location.TryGetProperty("address", out var a) ? a.GetString() : null;
+        var label = string.Join(" - ", new[] { name, address }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        return $"Location: {(label.Length > 0 ? label + " " : string.Empty)}(https://maps.google.com/?q={latitude},{longitude})";
+    }
+
+    private static string DescribeContacts(JsonElement contacts)
+    {
+        var cards = new List<string>();
+        foreach (var contact in contacts.EnumerateArray())
+        {
+            var name = contact.TryGetProperty("name", out var nameObj) && nameObj.TryGetProperty("formatted_name", out var fn)
+                ? fn.GetString() ?? "Contact"
+                : "Contact";
+            var phones = contact.TryGetProperty("phones", out var phoneList)
+                ? phoneList.EnumerateArray()
+                    .Select(p => p.TryGetProperty("phone", out var ph) ? ph.GetString() : null)
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .ToList()
+                : new List<string?>();
+            cards.Add(phones.Count == 0 ? name : $"{name} ({string.Join(", ", phones)})");
+        }
+        return $"Contact card: {string.Join("; ", cards)}";
     }
 
     private async Task<(string AttachmentUrl, string MessageType)?> DownloadWhatsAppMediaAsync(
@@ -562,14 +622,16 @@ public sealed class MetaWebhookController : ControllerBase
     private async Task<Customer?> FindCustomerByContactAsync(Guid organizationId, string contactField, string contactValue, CancellationToken cancellationToken)
     {
         var customers = await _customerRepository.GetAllAsync(organizationId, cancellationToken);
-        return customers.FirstOrDefault(c => contactField switch
-        {
-            "FacebookId" => string.Equals(c.FacebookId, contactValue, StringComparison.OrdinalIgnoreCase),
-            "InstagramId" => string.Equals(c.InstagramId, contactValue, StringComparison.OrdinalIgnoreCase),
-            "WhatsAppNumber" => string.Equals(c.WhatsAppNumber, contactValue, StringComparison.OrdinalIgnoreCase),
-            _ => false
-        });
+        return customers.FirstOrDefault(c => MatchesContact(c, contactField, contactValue));
     }
+
+    private static bool MatchesContact(Customer customer, string contactField, string contactValue) => contactField switch
+    {
+        "FacebookId" => string.Equals(customer.FacebookId, contactValue, StringComparison.OrdinalIgnoreCase),
+        "InstagramId" => string.Equals(customer.InstagramId, contactValue, StringComparison.OrdinalIgnoreCase),
+        "WhatsAppNumber" => WhatsAppNumber.AreEqual(customer.WhatsAppNumber, contactValue),
+        _ => false
+    };
 
     /// <summary>Read-only counterpart to FindOrCreateConversationAsync, used for delivery/read receipts.</summary>
     private async Task<Conversation?> FindConversationByCustomerAsync(Guid organizationId, Guid customerId, Guid? channelAccountId, Channel channel, CancellationToken cancellationToken)
@@ -581,13 +643,7 @@ public sealed class MetaWebhookController : ControllerBase
     private async Task<Customer> FindOrCreateCustomerAsync(Guid organizationId, string contactField, string contactValue, string? displayName, CancellationToken cancellationToken)
     {
         var customers = await _customerRepository.GetAllAsync(organizationId, cancellationToken);
-        var existing = customers.FirstOrDefault(c => contactField switch
-        {
-            "FacebookId" => string.Equals(c.FacebookId, contactValue, StringComparison.OrdinalIgnoreCase),
-            "InstagramId" => string.Equals(c.InstagramId, contactValue, StringComparison.OrdinalIgnoreCase),
-            "WhatsAppNumber" => string.Equals(c.WhatsAppNumber, contactValue, StringComparison.OrdinalIgnoreCase),
-            _ => false
-        });
+        var existing = customers.FirstOrDefault(c => MatchesContact(c, contactField, contactValue));
         if (existing is not null)
         {
             // Self-heal customers created before we resolved real profile names (e.g. Messenger/Instagram
@@ -608,7 +664,7 @@ public sealed class MetaWebhookController : ControllerBase
             Email = string.Empty,
             FacebookId = contactField == "FacebookId" ? contactValue : null,
             InstagramId = contactField == "InstagramId" ? contactValue : null,
-            WhatsAppNumber = contactField == "WhatsAppNumber" ? contactValue : null
+            WhatsAppNumber = contactField == "WhatsAppNumber" ? WhatsAppNumber.Normalize(contactValue) : null
         };
         await _customerRepository.CreateAsync(customer, cancellationToken);
         return customer;

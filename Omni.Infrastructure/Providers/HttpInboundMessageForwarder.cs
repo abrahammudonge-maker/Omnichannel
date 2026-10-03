@@ -13,6 +13,7 @@ public sealed class HttpInboundMessageForwarder : IInboundMessageForwarder
     public const string SignatureHeaderName = "X-Omnichannel-Signature";
     private const string WebhookUrlSettingName = "IntegrationWebhookUrl";
     private const string WebhookSecretSettingName = "IntegrationWebhookSecret";
+    private static readonly TimeSpan[] RetryDelays = { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3) };
 
     private readonly IOrganizationSettingRepository _organizationSettingRepository;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -92,30 +93,42 @@ public sealed class HttpInboundMessageForwarder : IInboundMessageForwarder
         }
 
         var webhookSecret = settings.FirstOrDefault(s => string.Equals(s.SettingName, WebhookSecretSettingName, StringComparison.OrdinalIgnoreCase))?.SettingValue;
+        var client = _httpClientFactory.CreateClient("GraphApi");
 
-        try
+        for (var attempt = 1; attempt <= RetryDelays.Length + 1; attempt++)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, webhookUrl)
+            try
             {
-                Content = new StringContent(payload, Encoding.UTF8, "application/json")
-            };
-            if (!string.IsNullOrWhiteSpace(webhookSecret))
+                using var request = new HttpRequestMessage(HttpMethod.Post, webhookUrl)
+                {
+                    Content = new StringContent(payload, Encoding.UTF8, "application/json")
+                };
+                if (!string.IsNullOrWhiteSpace(webhookSecret))
+                {
+                    request.Headers.TryAddWithoutValidation(SignatureHeaderName, Sign(payload, webhookSecret));
+                }
+
+                using var response = await client.SendAsync(request, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    return;
+                }
+
+                _logger.LogWarning("Forward to {WebhookUrl} for org {OrganizationId} returned {StatusCode} (attempt {Attempt}).", webhookUrl, organizationId, response.StatusCode, attempt);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                request.Headers.TryAddWithoutValidation(SignatureHeaderName, Sign(payload, webhookSecret));
+                // Never let a broken external webhook affect our own inbound message processing.
+                _logger.LogWarning(ex, "Failed to forward to {WebhookUrl} for org {OrganizationId} (attempt {Attempt}).", webhookUrl, organizationId, attempt);
             }
 
-            var client = _httpClientFactory.CreateClient("GraphApi");
-            var response = await client.SendAsync(request, cancellationToken);
-            if (!response.IsSuccessStatusCode)
+            if (attempt <= RetryDelays.Length)
             {
-                _logger.LogWarning("Forward to {WebhookUrl} for org {OrganizationId} returned {StatusCode}.", webhookUrl, organizationId, response.StatusCode);
+                await Task.Delay(RetryDelays[attempt - 1], cancellationToken);
             }
         }
-        catch (Exception ex)
-        {
-            // Never let a broken external webhook affect our own inbound message processing.
-            _logger.LogWarning(ex, "Failed to forward to {WebhookUrl} for org {OrganizationId}.", webhookUrl, organizationId);
-        }
+
+        _logger.LogError("Giving up forwarding to {WebhookUrl} for org {OrganizationId} after {Attempts} attempts.", webhookUrl, organizationId, RetryDelays.Length + 1);
     }
 
     private static string Sign(string payload, string secret) =>

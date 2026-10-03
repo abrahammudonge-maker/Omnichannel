@@ -4,6 +4,7 @@ using Omni.Api.Extensions;
 using Omni.Application.DTOs;
 using Omni.Application.Interfaces;
 using Omni.Domain.Entities;
+using Omni.Domain.ValueObjects;
 using Omni.Shared.Responses;
 
 namespace Omni.Api.Controllers;
@@ -62,7 +63,7 @@ public sealed class AdminCustomersController : ControllerBase
             Email = request.Email,
             FacebookId = request.FacebookId,
             InstagramId = request.InstagramId,
-            WhatsAppNumber = request.WhatsAppNumber
+            WhatsAppNumber = WhatsAppNumber.Normalize(request.WhatsAppNumber)
         };
 
         var id = await _customerRepository.CreateAsync(customer, cancellationToken);
@@ -81,7 +82,7 @@ public sealed class AdminCustomersController : ControllerBase
         customer.Email = request.Email;
         customer.FacebookId = request.FacebookId;
         customer.InstagramId = request.InstagramId;
-        customer.WhatsAppNumber = request.WhatsAppNumber;
+        customer.WhatsAppNumber = WhatsAppNumber.Normalize(request.WhatsAppNumber);
 
         await _customerRepository.UpdateAsync(customer, cancellationToken);
         await this.LogAuditAsync(_auditLogRepository, customer.OrganizationId, "AdminUpdate", "Customer", id, cancellationToken, $"Updated customer {request.FullName}");

@@ -1,4 +1,5 @@
 using Dapper;
+using Omni.Application.DTOs;
 using Omni.Application.Interfaces;
 using Omni.Domain.Entities;
 using Omni.Infrastructure.Database;
@@ -19,6 +20,13 @@ public sealed class MessageRepository : IMessageRepository
     {
         using var connection = _connectionFactory.CreateConnection();
         return await connection.QuerySingleOrDefaultAsync<Message>(MessageQueries.GetById, new { Id = id, OrganizationId = organizationId });
+    }
+
+    public async Task<IReadOnlyList<MessageStatRow>> GetStatsSinceAsync(Guid organizationId, DateTimeOffset since, CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        var result = await connection.QueryAsync<MessageStatRow>(MessageQueries.GetStatsSince, new { OrganizationId = organizationId, Since = since });
+        return result.ToList();
     }
 
     public async Task<IReadOnlyList<Message>> GetAllAsync(Guid organizationId, CancellationToken cancellationToken)

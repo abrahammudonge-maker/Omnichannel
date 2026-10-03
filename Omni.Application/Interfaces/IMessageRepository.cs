@@ -1,9 +1,11 @@
+using Omni.Application.DTOs;
 using Omni.Domain.Entities;
 
 namespace Omni.Application.Interfaces;
 
 public interface IMessageRepository
 {
+    Task<IReadOnlyList<MessageStatRow>> GetStatsSinceAsync(Guid organizationId, DateTimeOffset since, CancellationToken cancellationToken);
     Task<Message?> GetByIdAsync(Guid id, Guid organizationId, CancellationToken cancellationToken);
     Task<IReadOnlyList<Message>> GetAllAsync(Guid organizationId, CancellationToken cancellationToken);
     Task<IReadOnlyList<Message>> GetByConversationIdAsync(Guid conversationId, Guid organizationId, CancellationToken cancellationToken);

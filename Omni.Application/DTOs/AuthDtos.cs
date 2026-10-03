@@ -12,3 +12,5 @@ public sealed record UpdateCustomerRequest(string FullName, string Phone, string
 public sealed record CreateConversationRequest(Guid CustomerId, string Channel, string Status, Guid? AssignedUserId, Guid? ChannelAccountId = null);
 public sealed record CreateMessageRequest(Guid ConversationId, string Direction, string MessageType, string Body, string? AttachmentUrl, string Status, Guid? AttachmentId = null);
 public sealed record AdminUserView(Guid Id, Guid OrganizationId, string OrganizationName, string FirstName, string LastName, string Email, string Role, bool IsActive, DateTimeOffset CreatedAt);
+
+public sealed record SendLocationMessageRequest(Guid ConversationId, double Latitude, double Longitude, string? Name, string? Address);

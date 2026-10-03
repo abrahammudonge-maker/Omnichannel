@@ -76,6 +76,18 @@ public static class MessageQueries
         WHERE conversationid = @ConversationId AND organizationid = @OrganizationId AND direction = 'Inbound';
     ";
 
+    public const string GetStatsSince = @"
+        SELECT CAST(SWITCHOFFSET(m.sentat, '+00:00') AS DATE) AS Day,
+               c.channel AS Channel,
+               m.direction AS Direction,
+               LOWER(m.status) AS Status,
+               COUNT(1) AS Count
+        FROM messages m
+        JOIN conversations c ON c.id = m.conversationid
+        WHERE m.organizationid = @OrganizationId AND m.sentat >= @Since
+        GROUP BY CAST(SWITCHOFFSET(m.sentat, '+00:00') AS DATE), c.channel, m.direction, LOWER(m.status);
+    ";
+
     public const string MarkOutboundAsRead = @"
         UPDATE messages
         SET status = 'read'

@@ -49,6 +49,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMessageTemplateRepository, MessageTemplateRepository>();
         services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
         services.AddScoped<ITemplateMessageService, TemplateMessageService>();
+        services.AddScoped<IWhatsAppContactResolver, WhatsAppContactResolver>();
         services.AddScoped<ICallRepository, CallRepository>();
         services.AddScoped<IPhoneNumberRepository, PhoneNumberRepository>();
         services.AddScoped<ICallQueueRepository, CallQueueRepository>();

@@ -4,8 +4,10 @@ using Microsoft.AspNetCore.RateLimiting;
 using Omni.Api.Authentication;
 using Omni.Application.DTOs;
 using Omni.Application.Interfaces;
+using Omni.Application.Services;
 using Omni.Domain.Entities;
 using Omni.Domain.Enums;
+using Omni.Domain.ValueObjects;
 using Omni.Shared.Responses;
 
 namespace Omni.Api.Controllers;
@@ -29,6 +31,7 @@ public sealed class IntegrationsController : ControllerBase
     private readonly IMessageRepository _messageRepository;
     private readonly IAttachmentRepository _attachmentRepository;
     private readonly IOrganizationSettingRepository _organizationSettingRepository;
+    private readonly IWhatsAppContactResolver _contactResolver;
     private readonly ITemplateMessageService _templateMessageService;
     private readonly IMetaMessageSender _metaMessageSender;
     private readonly IWebHostEnvironment _environment;
@@ -42,6 +45,7 @@ public sealed class IntegrationsController : ControllerBase
         IMessageRepository messageRepository,
         IAttachmentRepository attachmentRepository,
         IOrganizationSettingRepository organizationSettingRepository,
+        IWhatsAppContactResolver contactResolver,
         ITemplateMessageService templateMessageService,
         IMetaMessageSender metaMessageSender,
         IWebHostEnvironment environment,
@@ -54,6 +58,7 @@ public sealed class IntegrationsController : ControllerBase
         _messageRepository = messageRepository;
         _attachmentRepository = attachmentRepository;
         _organizationSettingRepository = organizationSettingRepository;
+        _contactResolver = contactResolver;
         _templateMessageService = templateMessageService;
         _metaMessageSender = metaMessageSender;
         _environment = environment;
@@ -150,8 +155,8 @@ public sealed class IntegrationsController : ControllerBase
                 continue;
             }
 
-            var customer = await FindOrCreateCustomerAsync(organizationId, recipient.PhoneNumber, recipient.CustomerName, cancellationToken);
-            var conversation = await FindOrCreateConversationAsync(organizationId, customer.Id, account.Id, cancellationToken);
+            var customer = await _contactResolver.FindOrCreateCustomerAsync(organizationId, recipient.PhoneNumber, recipient.CustomerName, cancellationToken);
+            var conversation = await _contactResolver.FindOrCreateConversationAsync(organizationId, customer.Id, account.Id, cancellationToken);
             var bodyParameters = recipient.BodyParameters ?? new List<string>();
 
             var sendResult = await _templateMessageService.SendAsync(
@@ -339,6 +344,86 @@ public sealed class IntegrationsController : ControllerBase
         }
     }
 
+    /// <summary>Sends a WhatsApp location pin. Subject to the same 24-hour customer service window as free-text.</summary>
+    [HttpPost("messages/location")]
+    [EnableRateLimiting("integrations")]
+    public async Task<ActionResult<ApiResponse<SendIntegrationMessageResponse>>> SendLocation([FromBody] SendIntegrationLocationRequest request, CancellationToken cancellationToken)
+    {
+        var organizationId = GetOrganizationId();
+        if (string.IsNullOrWhiteSpace(request.PhoneNumber))
+        {
+            return BadRequest(ApiResponse<SendIntegrationMessageResponse>.Fail("phoneNumber is required."));
+        }
+
+        var body = LocationText.Format(request.Latitude, request.Longitude, request.Name, request.Address);
+
+        return await SendNonTextAsync(
+            organizationId, request.PhoneNumber, request.CustomerName, "Location", body,
+            account => _metaMessageSender.SendWhatsAppLocationAsync(
+                account.AccessToken!, account.ExternalAccountId!, request.PhoneNumber, request.Latitude, request.Longitude, request.Name, request.Address, cancellationToken),
+            cancellationToken);
+    }
+
+    /// <summary>Sends a WhatsApp contact card with one or more phone numbers.</summary>
+    [HttpPost("messages/contact")]
+    [EnableRateLimiting("integrations")]
+    public async Task<ActionResult<ApiResponse<SendIntegrationMessageResponse>>> SendContact([FromBody] SendIntegrationContactRequest request, CancellationToken cancellationToken)
+    {
+        var organizationId = GetOrganizationId();
+        if (string.IsNullOrWhiteSpace(request.PhoneNumber) || string.IsNullOrWhiteSpace(request.FormattedName) || request.PhoneNumbers is null || request.PhoneNumbers.Count == 0)
+        {
+            return BadRequest(ApiResponse<SendIntegrationMessageResponse>.Fail("phoneNumber, formattedName, and at least one phoneNumbers entry are required."));
+        }
+
+        var body = $"Contact card: {request.FormattedName} ({string.Join(", ", request.PhoneNumbers)})";
+
+        return await SendNonTextAsync(
+            organizationId, request.PhoneNumber, request.CustomerName, "Contact", body,
+            account => _metaMessageSender.SendWhatsAppContactAsync(
+                account.AccessToken!, account.ExternalAccountId!, request.PhoneNumber, request.FormattedName, request.PhoneNumbers, cancellationToken),
+            cancellationToken);
+    }
+
+    private async Task<ActionResult<ApiResponse<SendIntegrationMessageResponse>>> SendNonTextAsync(
+        Guid organizationId, string phoneNumber, string? customerName, string messageType, string body,
+        Func<ChannelAccount, Task<MetaMessageSendResult>> send, CancellationToken cancellationToken)
+    {
+        var resolved = await ResolveOutboundWhatsAppContextAsync(organizationId, phoneNumber, customerName, cancellationToken);
+        if (resolved.ErrorMessage is not null)
+        {
+            return BadRequest(ApiResponse<SendIntegrationMessageResponse>.Fail(resolved.ErrorMessage));
+        }
+
+        var (conversation, account, _) = resolved;
+        var message = new Message
+        {
+            OrganizationId = organizationId,
+            ConversationId = conversation!.Id,
+            Direction = "Outbound",
+            MessageType = messageType,
+            Body = body,
+            Status = "Queued"
+        };
+        var messageId = await _messageRepository.CreateAsync(message, cancellationToken);
+
+        try
+        {
+            var result = await send(account!);
+            message.ExternalMessageId = result.ExternalMessageId;
+            message.Status = "Sent";
+            await _messageRepository.UpdateAsync(message, cancellationToken);
+            return Ok(ApiResponse<SendIntegrationMessageResponse>.Ok(
+                new SendIntegrationMessageResponse(conversation.Id, messageId, result.ExternalMessageId), "Message sent successfully."));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send WhatsApp {MessageType} message via integrations API for conversation {ConversationId}", messageType, conversation.Id);
+            message.Status = "Failed";
+            await _messageRepository.UpdateAsync(message, cancellationToken);
+            return Ok(ApiResponse<SendIntegrationMessageResponse>.Fail($"Message saved, but not delivered: {ex.Message}"));
+        }
+    }
+
     /// <summary>
     /// Downloads an attachment (inbound or outbound) belonging to this organization. This mirrors
     /// AttachmentsController's agent-only download endpoint, but accepts the API key instead of an
@@ -379,7 +464,7 @@ public sealed class IntegrationsController : ControllerBase
             return (null, null, "No active WhatsApp channel is connected for this organization.");
         }
 
-        var customer = await FindOrCreateCustomerAsync(organizationId, phoneNumber, customerName, cancellationToken);
+        var customer = await _contactResolver.FindOrCreateCustomerAsync(organizationId, phoneNumber, customerName, cancellationToken);
 
         var existingConversations = (await _conversationRepository.GetAllAsync(organizationId, cancellationToken))
             .Where(c => c.CustomerId == customer.Id && c.Channel == Channel.WhatsApp)
@@ -411,7 +496,7 @@ public sealed class IntegrationsController : ControllerBase
             // No prior inbound message on any connected number — the 24h check below will reject this
             // anyway, but pick a number so the attempt (and its failure) is recorded.
             account = activeWhatsAppAccounts[0];
-            conversation = await FindOrCreateConversationAsync(organizationId, customer.Id, account.Id, cancellationToken);
+            conversation = await _contactResolver.FindOrCreateConversationAsync(organizationId, customer.Id, account.Id, cancellationToken);
         }
 
         if (lastInboundSentAt is null || DateTimeOffset.UtcNow - lastInboundSentAt.Value > TimeSpan.FromHours(24))
@@ -421,48 +506,6 @@ public sealed class IntegrationsController : ControllerBase
         }
 
         return (conversation, account, null);
-    }
-
-    private async Task<Customer> FindOrCreateCustomerAsync(Guid organizationId, string whatsAppNumber, string? displayName, CancellationToken cancellationToken)
-    {
-        var customers = await _customerRepository.GetAllAsync(organizationId, cancellationToken);
-        var existing = customers.FirstOrDefault(c => string.Equals(c.WhatsAppNumber, whatsAppNumber, StringComparison.OrdinalIgnoreCase));
-        if (existing is not null)
-        {
-            return existing;
-        }
-
-        var customer = new Customer
-        {
-            OrganizationId = organizationId,
-            FullName = string.IsNullOrWhiteSpace(displayName) ? whatsAppNumber : displayName,
-            Phone = string.Empty,
-            Email = string.Empty,
-            WhatsAppNumber = whatsAppNumber
-        };
-        await _customerRepository.CreateAsync(customer, cancellationToken);
-        return customer;
-    }
-
-    private async Task<Conversation> FindOrCreateConversationAsync(Guid organizationId, Guid customerId, Guid channelAccountId, CancellationToken cancellationToken)
-    {
-        var conversations = await _conversationRepository.GetAllAsync(organizationId, cancellationToken);
-        var existing = conversations.FirstOrDefault(c => c.CustomerId == customerId && c.ChannelAccountId == channelAccountId && c.Channel == Channel.WhatsApp);
-        if (existing is not null)
-        {
-            return existing;
-        }
-
-        var conversation = new Conversation
-        {
-            OrganizationId = organizationId,
-            CustomerId = customerId,
-            ChannelAccountId = channelAccountId,
-            Channel = Channel.WhatsApp,
-            Status = "Open"
-        };
-        await _conversationRepository.CreateAsync(conversation, cancellationToken);
-        return conversation;
     }
 
     private Guid GetOrganizationId()
