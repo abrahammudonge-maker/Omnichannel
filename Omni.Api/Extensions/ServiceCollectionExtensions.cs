@@ -35,6 +35,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICustomerRepository, CustomerRepository>();
         services.AddScoped<IConversationRepository, ConversationRepository>();
         services.AddScoped<IMessageRepository, MessageRepository>();
+        services.AddScoped<IOtpRepository, OtpRepository>();
         services.AddScoped<IDepartmentRepository, DepartmentRepository>();
         services.AddScoped<ITeamRepository, TeamRepository>();
         services.AddScoped<IConversationAssignmentRepository, ConversationAssignmentRepository>();
@@ -48,7 +49,15 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IChannelAccountRepository, ChannelAccountRepository>();
         services.AddScoped<IMessageTemplateRepository, MessageTemplateRepository>();
         services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
+        services.AddScoped<NumberKeyChannelResolver>();
         services.AddScoped<ITemplateMessageService, TemplateMessageService>();
+        services.AddScoped<ITemplateSendRepository, TemplateSendRepository>();
+        services.AddSingleton<TemplateSendSignal>();
+        services.AddSingleton<ITemplateSendSignal>(sp => sp.GetRequiredService<TemplateSendSignal>());
+        services.AddHostedService<TemplateSendDispatcher>();
+        services.AddScoped<IWhatsAppTemplateSyncService, WhatsAppTemplateSyncService>();
+        services.AddHostedService<TemplateSyncBackgroundService>();
+        services.AddSingleton<DatabaseMigrator>();
         services.AddScoped<IWhatsAppContactResolver, WhatsAppContactResolver>();
         services.AddScoped<ICallRepository, CallRepository>();
         services.AddScoped<IPhoneNumberRepository, PhoneNumberRepository>();
@@ -105,6 +114,19 @@ public static class ServiceCollectionExtensions
                 return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = 30,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0
+                });
+            });
+            // Status lookups get their own, larger budget so polling never uses up the send budget.
+            options.AddPolicy("integration-reads", httpContext =>
+            {
+                var partitionKey = httpContext.User.Claims.FirstOrDefault(c => c.Type == "ApiKeyId")?.Value
+                    ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                    ?? "unknown";
+                return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 120,
                     Window = TimeSpan.FromMinutes(1),
                     QueueLimit = 0
                 });

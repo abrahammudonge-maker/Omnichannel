@@ -179,6 +179,14 @@ Get-EventLog -LogName Application -Source "IIS AspNetCore Module V2" -Newest 5 |
 4. Run `deploy-artifacts\AuthAndWorkflowMigration.sql` against the same
    database to enable revocable refresh tokens. A fresh database already
    receives the table from `InitialSchema.sql`.
+5. Newer migrations (`OtpMigration.sql`, `NumberKeyMigration.sql`,
+   `TemplateSendMigration.sql` and anything added to `DatabaseMigrator.Scripts`
+   later) run automatically when the API starts, and are recorded in the
+   `schema_migrations` table. The app's SQL login needs rights to create and
+   alter tables. If it doesn't have them, set `"Database": { "AutoMigrate": false }`
+   in `appsettings.Production.json` and run those scripts by hand with
+   `sqlcmd -I` (the `-I` flag is required for the filtered indexes). A failed
+   migration is logged at startup; the API still starts.
 
 ---
 

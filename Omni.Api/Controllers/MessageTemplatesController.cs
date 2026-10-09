@@ -15,15 +15,18 @@ public sealed class MessageTemplatesController : ControllerBase
     private readonly IMessageTemplateRepository _messageTemplateRepository;
     private readonly IChannelAccountRepository _channelAccountRepository;
     private readonly IMetaTemplateService _metaTemplateService;
+    private readonly IWhatsAppTemplateSyncService _templateSyncService;
 
     public MessageTemplatesController(
         IMessageTemplateRepository messageTemplateRepository,
         IChannelAccountRepository channelAccountRepository,
-        IMetaTemplateService metaTemplateService)
+        IMetaTemplateService metaTemplateService,
+        IWhatsAppTemplateSyncService templateSyncService)
     {
         _messageTemplateRepository = messageTemplateRepository;
         _channelAccountRepository = channelAccountRepository;
         _metaTemplateService = metaTemplateService;
+        _templateSyncService = templateSyncService;
     }
 
     [HttpGet]
@@ -136,23 +139,8 @@ public sealed class MessageTemplatesController : ControllerBase
                 "This channel is missing its WhatsApp Business Account ID or access token. Reconnect it via \"Connect via Meta\", or set the WABA ID under \"Enter details manually\", before syncing templates."));
         }
 
-        var templates = await _metaTemplateService.FetchTemplatesAsync(account.ExternalWabaId, account.AccessToken, cancellationToken);
-        foreach (var template in templates)
-        {
-            await _messageTemplateRepository.UpsertAsync(new MessageTemplate
-            {
-                OrganizationId = organizationId,
-                ChannelAccountId = account.Id,
-                Name = template.Name,
-                Language = template.Language,
-                Category = template.Category,
-                Status = template.Status,
-                BodyText = template.BodyText,
-                ComponentsJson = template.ComponentsJson
-            }, cancellationToken);
-        }
-
-        return Ok(ApiResponse<SyncMessageTemplatesResponse>.Ok(new SyncMessageTemplatesResponse(templates.Count), $"Synced {templates.Count} template(s)."));
+        var count = await _templateSyncService.SyncAsync(account, cancellationToken);
+        return Ok(ApiResponse<SyncMessageTemplatesResponse>.Ok(new SyncMessageTemplatesResponse(count), $"Synced {count} template(s)."));
     }
 
     private Guid GetOrganizationId()

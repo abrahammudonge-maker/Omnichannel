@@ -17,6 +17,7 @@ namespace Omni.Api.Controllers;
 public sealed class MessagesController : ControllerBase
 {
     private readonly IMessageRepository _messageRepository;
+    private readonly IOtpRepository _otpRepository;
     private readonly IConversationRepository _conversationRepository;
     private readonly ICustomerRepository _customerRepository;
     private readonly IChannelAccountRepository _channelAccountRepository;
@@ -31,6 +32,7 @@ public sealed class MessagesController : ControllerBase
 
     public MessagesController(
         IMessageRepository messageRepository,
+        IOtpRepository otpRepository,
         IConversationRepository conversationRepository,
         ICustomerRepository customerRepository,
         IChannelAccountRepository channelAccountRepository,
@@ -44,6 +46,7 @@ public sealed class MessagesController : ControllerBase
         ILogger<MessagesController> logger)
     {
         _messageRepository = messageRepository;
+        _otpRepository = otpRepository;
         _conversationRepository = conversationRepository;
         _customerRepository = customerRepository;
         _channelAccountRepository = channelAccountRepository;
@@ -70,6 +73,8 @@ public sealed class MessagesController : ControllerBase
     {
         var organizationId = GetOrganizationId();
         var result = await _messageRepository.GetByConversationIdAsync(conversationId, organizationId, cancellationToken);
+        var otpRows = await _otpRepository.GetByMessageIdsAsync(organizationId, result.Select(m => m.Id).ToList(), cancellationToken);
+        OtpCodeRedactor.HideExpiredCodes(result, otpRows, DateTimeOffset.UtcNow);
         return Ok(ApiResponse<IReadOnlyList<Message>>.Ok(result, "Messages retrieved successfully."));
     }
 

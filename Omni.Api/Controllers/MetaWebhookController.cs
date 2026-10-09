@@ -28,6 +28,8 @@ public sealed class MetaWebhookController : ControllerBase
     private readonly IUserRepository _userRepository;
     private readonly IAttachmentRepository _attachmentRepository;
     private readonly IInboundMessageForwarder _inboundMessageForwarder;
+    private readonly IOtpRepository _otpRepository;
+    private readonly ITemplateSendRepository _templateSendRepository;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IWebHostEnvironment _environment;
     private readonly MetaSettings _metaSettings;
@@ -42,6 +44,8 @@ public sealed class MetaWebhookController : ControllerBase
         IUserRepository userRepository,
         IAttachmentRepository attachmentRepository,
         IInboundMessageForwarder inboundMessageForwarder,
+        IOtpRepository otpRepository,
+        ITemplateSendRepository templateSendRepository,
         IHttpClientFactory httpClientFactory,
         IWebHostEnvironment environment,
         IOptions<MetaSettings> metaSettings,
@@ -55,6 +59,8 @@ public sealed class MetaWebhookController : ControllerBase
         _userRepository = userRepository;
         _attachmentRepository = attachmentRepository;
         _inboundMessageForwarder = inboundMessageForwarder;
+        _otpRepository = otpRepository;
+        _templateSendRepository = templateSendRepository;
         _httpClientFactory = httpClientFactory;
         _environment = environment;
         _metaSettings = metaSettings.Value;
@@ -334,6 +340,7 @@ public sealed class MetaWebhookController : ControllerBase
                             // A successful POST to /messages only means Meta accepted the request.  The
                             // actual delivery failure (including its Meta error code/details) arrives here.
                             // Previously we discarded it, leaving the inbox with only a red failed icon.
+                            string? failureReason = null;
                             if (string.Equals(deliveryStatus, "failed", StringComparison.OrdinalIgnoreCase))
                             {
                                 var errors = status.TryGetProperty("errors", out var errorsProp)
@@ -343,9 +350,12 @@ public sealed class MetaWebhookController : ControllerBase
                                     "WhatsApp delivery failed for message {ExternalMessageId}. Meta errors: {MetaErrors}",
                                     externalMessageId,
                                     errors);
+                                failureReason = DescribeDeliveryFailure(status);
                             }
 
                             await _messageRepository.UpdateStatusByExternalMessageIdAsync(externalMessageId, organizationId, deliveryStatus, cancellationToken);
+                            await _otpRepository.UpdateStatusByExternalMessageIdAsync(externalMessageId, organizationId, deliveryStatus, cancellationToken);
+                            await _templateSendRepository.UpdateStatusByExternalMessageIdAsync(externalMessageId, organizationId, deliveryStatus, failureReason, cancellationToken);
                             await _inboundMessageForwarder.ForwardStatusUpdateAsync(organizationId, externalMessageId, deliveryStatus, cancellationToken);
                         }
                     }
@@ -442,6 +452,22 @@ public sealed class MetaWebhookController : ControllerBase
                 }
             }
         }
+    }
+
+    /// <summary>Meta's reason for a failed delivery, e.g. "Message failed to send because more than 24 hours have passed... (Meta error 131047)".</summary>
+    private static string DescribeDeliveryFailure(JsonElement status)
+    {
+        if (!status.TryGetProperty("errors", out var errors) || errors.ValueKind != JsonValueKind.Array || errors.GetArrayLength() == 0)
+        {
+            return "WhatsApp reported the message as failed without a reason.";
+        }
+
+        var error = errors[0];
+        var details = error.TryGetProperty("error_data", out var data) && data.TryGetProperty("details", out var detailsProp) ? detailsProp.GetString() : null;
+        details ??= error.TryGetProperty("message", out var messageProp) ? messageProp.GetString() : null;
+        details ??= error.TryGetProperty("title", out var titleProp) ? titleProp.GetString() : null;
+        var code = error.TryGetProperty("code", out var codeProp) ? codeProp.GetRawText() : null;
+        return code is null ? details ?? "Unknown WhatsApp error." : $"{details ?? "Unknown WhatsApp error."} (Meta error {code})";
     }
 
     private static string DescribeLocation(JsonElement location)

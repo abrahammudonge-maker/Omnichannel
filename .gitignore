@@ -11,7 +11,10 @@ appsettings.*.local.json
 ## Deployment artifacts (built locally, contain real secrets — never commit)
 publish/
 deploy-artifacts/
-deploy-artifacts.zip
+deploy-artifacts*.zip
+
+## Runtime data (data-protection keys that encrypt stored channel tokens, uploaded attachments)
+App_Data/
 
 ## IDE
 .vs/

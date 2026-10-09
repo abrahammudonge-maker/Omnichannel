@@ -347,7 +347,7 @@ public sealed class GraphApiMessageSender : IMetaMessageSender
 
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException($"Graph API send failed ({(int)response.StatusCode}): {responseBody}");
+            throw new MetaApiException($"Graph API send failed ({(int)response.StatusCode}): {responseBody}", response.StatusCode, responseBody);
         }
 
         using var document = JsonDocument.Parse(responseBody);

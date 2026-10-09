@@ -25,9 +25,18 @@ public sealed class ApiKeyRepository : IApiKeyRepository
             apiKey.Name,
             apiKey.KeyHash,
             apiKey.KeyPrefix,
-            apiKey.CreatedAt
+            apiKey.CreatedAt,
+            apiKey.Scope,
+            apiKey.ChannelAccountId
         });
         return apiKey.Id;
+    }
+
+    public async Task<bool> SetChannelAccountAsync(Guid id, Guid organizationId, Guid? channelAccountId, CancellationToken cancellationToken)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        var rows = await connection.ExecuteAsync(ApiKeyQueries.SetChannelAccount, new { Id = id, OrganizationId = organizationId, ChannelAccountId = channelAccountId });
+        return rows > 0;
     }
 
     public async Task<IReadOnlyList<ApiKey>> GetAllAsync(Guid organizationId, CancellationToken cancellationToken)

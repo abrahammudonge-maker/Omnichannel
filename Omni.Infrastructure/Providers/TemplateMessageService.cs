@@ -33,18 +33,31 @@ public sealed class TemplateMessageService : ITemplateMessageService
         MessageTemplate template,
         string recipientWhatsAppNumber,
         IReadOnlyList<string> bodyParameters,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? retryOfMessageId = null)
     {
-        var message = new Message
+        // A retry reuses the message row of the failed attempt, so the inbox shows one message, not one per attempt.
+        var message = retryOfMessageId is null ? null : await _messageRepository.GetByIdAsync(retryOfMessageId.Value, organizationId, cancellationToken);
+        Guid messageId;
+        if (message is not null && message.ConversationId == conversationId)
         {
-            OrganizationId = organizationId,
-            ConversationId = conversationId,
-            Direction = "Outbound",
-            MessageType = "Template",
-            Body = RenderTemplateBody(template.BodyText, bodyParameters),
-            Status = "Queued"
-        };
-        var messageId = await _messageRepository.CreateAsync(message, cancellationToken);
+            message.Status = "Queued";
+            await _messageRepository.UpdateAsync(message, cancellationToken);
+            messageId = message.Id;
+        }
+        else
+        {
+            message = new Message
+            {
+                OrganizationId = organizationId,
+                ConversationId = conversationId,
+                Direction = "Outbound",
+                MessageType = "Template",
+                Body = RenderTemplateBody(template.BodyText, bodyParameters),
+                Status = "Queued"
+            };
+            messageId = await _messageRepository.CreateAsync(message, cancellationToken);
+        }
 
         try
         {
@@ -62,7 +75,10 @@ public sealed class TemplateMessageService : ITemplateMessageService
             _logger.LogError(ex, "Failed to send WhatsApp template {TemplateName} for conversation {ConversationId}", template.Name, conversationId);
             message.Status = "Failed";
             await _messageRepository.UpdateAsync(message, cancellationToken);
-            return new TemplateSendResult(false, messageId, null, $"Template send failed: {ex.Message}");
+            var reason = ex is MetaApiException { Details: not null } meta
+                ? meta.ErrorCode is null ? meta.Details : $"{meta.Details} (Meta error {meta.ErrorCode})"
+                : ex.Message;
+            return new TemplateSendResult(false, messageId, null, $"Template send failed: {reason}", MetaApiException.IsTransientFailure(ex));
         }
     }
 

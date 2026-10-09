@@ -14,6 +14,13 @@ builder.Services.AddApplicationServices(builder.Configuration, builder.Environme
 
 var app = builder.Build();
 
+// Brings the database schema up to date before background workers start using it. Set
+// Database:AutoMigrate to false where the app's SQL login isn't allowed to change the schema.
+if (builder.Configuration.GetValue("Database:AutoMigrate", true))
+{
+    await app.Services.GetRequiredService<Omni.Infrastructure.Database.DatabaseMigrator>().MigrateAsync(CancellationToken.None);
+}
+
 var pathBase = builder.Configuration["PathBase"];
 if (!string.IsNullOrWhiteSpace(pathBase))
 {

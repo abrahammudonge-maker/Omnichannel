@@ -11,4 +11,7 @@ public interface IApiKeyRepository
     Task<ApiKey?> FindByHashAsync(string keyHash, CancellationToken cancellationToken);
     Task RevokeAsync(Guid id, Guid organizationId, CancellationToken cancellationToken);
     Task MarkUsedAsync(Guid id, CancellationToken cancellationToken);
+
+    /// <summary>Ties an active key to a WhatsApp number (or unties it with null). Returns false if the key isn't found or is revoked.</summary>
+    Task<bool> SetChannelAccountAsync(Guid id, Guid organizationId, Guid? channelAccountId, CancellationToken cancellationToken);
 }

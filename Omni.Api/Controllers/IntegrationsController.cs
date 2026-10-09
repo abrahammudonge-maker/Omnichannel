@@ -29,6 +29,7 @@ public sealed class IntegrationsController : ControllerBase
     private readonly ICustomerRepository _customerRepository;
     private readonly IConversationRepository _conversationRepository;
     private readonly IMessageRepository _messageRepository;
+    private readonly IOtpRepository _otpRepository;
     private readonly IAttachmentRepository _attachmentRepository;
     private readonly IOrganizationSettingRepository _organizationSettingRepository;
     private readonly IWhatsAppContactResolver _contactResolver;
@@ -43,6 +44,7 @@ public sealed class IntegrationsController : ControllerBase
         ICustomerRepository customerRepository,
         IConversationRepository conversationRepository,
         IMessageRepository messageRepository,
+        IOtpRepository otpRepository,
         IAttachmentRepository attachmentRepository,
         IOrganizationSettingRepository organizationSettingRepository,
         IWhatsAppContactResolver contactResolver,
@@ -56,6 +58,7 @@ public sealed class IntegrationsController : ControllerBase
         _customerRepository = customerRepository;
         _conversationRepository = conversationRepository;
         _messageRepository = messageRepository;
+        _otpRepository = otpRepository;
         _attachmentRepository = attachmentRepository;
         _organizationSettingRepository = organizationSettingRepository;
         _contactResolver = contactResolver;
@@ -202,6 +205,8 @@ public sealed class IntegrationsController : ControllerBase
         }
 
         var messages = await _messageRepository.GetByConversationIdAsync(conversationId, organizationId, cancellationToken);
+        var otpRows = await _otpRepository.GetByMessageIdsAsync(organizationId, messages.Select(m => m.Id).ToList(), cancellationToken);
+        OtpCodeRedactor.HideExpiredCodes(messages, otpRows, DateTimeOffset.UtcNow);
         return Ok(ApiResponse<IReadOnlyList<Message>>.Ok(messages, "Messages retrieved successfully."));
     }
 

@@ -5,6 +5,7 @@ using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 using Omni.Application.Interfaces;
+using Omni.Domain.Entities;
 
 namespace Omni.Api.Authentication;
 
@@ -43,13 +44,26 @@ public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authenti
             return AuthenticateResult.Fail("Invalid or revoked API key.");
         }
 
+        var scope = string.IsNullOrWhiteSpace(apiKey.Scope) ? "integrations" : apiKey.Scope;
+        if (ApiKey.IsNumberScope(scope)
+            && !Request.Path.StartsWithSegments("/api/otp", StringComparison.OrdinalIgnoreCase)
+            && !Request.Path.StartsWithSegments("/api/whatsapp", StringComparison.OrdinalIgnoreCase))
+        {
+            return AuthenticateResult.Fail("This API key can only be used for WhatsApp OTP and template sends.");
+        }
+
         await _apiKeyRepository.MarkUsedAsync(apiKey.Id, Context.RequestAborted);
 
-        var claims = new[]
+        var claims = new List<Claim>
         {
-            new Claim("OrganizationId", apiKey.OrganizationId.ToString()),
-            new Claim("ApiKeyId", apiKey.Id.ToString())
+            new("OrganizationId", apiKey.OrganizationId.ToString()),
+            new("ApiKeyId", apiKey.Id.ToString()),
+            new("Scope", scope)
         };
+        if (apiKey.ChannelAccountId is not null)
+        {
+            claims.Add(new Claim("ChannelAccountId", apiKey.ChannelAccountId.Value.ToString()));
+        }
         var identity = new ClaimsIdentity(claims, SchemeName);
         var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName);
         return AuthenticateResult.Success(ticket);

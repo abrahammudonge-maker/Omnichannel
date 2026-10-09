@@ -2,7 +2,8 @@ using Omni.Domain.Entities;
 
 namespace Omni.Application.Interfaces;
 
-public sealed record TemplateSendResult(bool Success, Guid MessageId, string? ExternalMessageId, string? ErrorMessage);
+/// <summary>Transient is true when the failure (throttling, Meta outage, network) is worth retrying later.</summary>
+public sealed record TemplateSendResult(bool Success, Guid MessageId, string? ExternalMessageId, string? ErrorMessage, bool Transient = false);
 
 /// <summary>
 /// Renders and sends an approved WhatsApp template message, and records the resulting Message row.
@@ -18,5 +19,6 @@ public interface ITemplateMessageService
         MessageTemplate template,
         string recipientWhatsAppNumber,
         IReadOnlyList<string> bodyParameters,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        Guid? retryOfMessageId = null);
 }

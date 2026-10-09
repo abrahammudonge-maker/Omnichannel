@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.RegularExpressions;
 using MailKit;
 using MailKit.Net.Imap;
@@ -238,7 +239,14 @@ public sealed class EmailInboxPollingService : BackgroundService
             return null;
         }
 
-        return Regex.Replace(html, "<.*?>", string.Empty).Trim();
+        var text = Regex.Replace(html, @"<(style|script|head|title)\b[^>]*>.*?</\1\s*>", string.Empty, RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        text = Regex.Replace(text, @"<!--.*?-->", string.Empty, RegexOptions.Singleline);
+        text = Regex.Replace(text, @"<br\s*/?>|</(p|div|tr|li|h[1-6])\s*>", "\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, "<.*?>", string.Empty, RegexOptions.Singleline);
+        text = WebUtility.HtmlDecode(text).Replace(' ', ' ');
+        text = Regex.Replace(text, @"[ \t]+", " ");
+        text = Regex.Replace(text, @"\n\s*\n+", "\n\n");
+        return text.Trim();
     }
 
     private static string StripQuotedReply(string text)
